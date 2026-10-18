@@ -18,8 +18,10 @@ namespace CS2MCP
     public sealed class HttpBridgeServer
     {
         private const int MaxHeaderBytes = 16 * 1024;
-        private const int MaxBodyBytes = 1024 * 1024;
+        private const int MaxBodyBytes = 16 * 1024 * 1024;
         private const int MainThreadTimeoutMs = 10000;
+        // Network imports and their undo run over many tool frames.
+        private const int ImportTimeoutMs = 15 * 60 * 1000;
 
         private readonly int m_Port;
         private readonly Action<BridgeRequest> m_EnqueueToMainThread;
@@ -112,9 +114,11 @@ namespace CS2MCP
             }
 
             m_EnqueueToMainThread(request);
-            BridgeResponse response = request.WaitForResponse(MainThreadTimeoutMs);
-            return response ?? BridgeResponse.Error(503,
-                "simulation thread did not respond within 10s (game still loading, or bridge system disabled)");
+            bool import = request.Path.StartsWith("/import/", StringComparison.Ordinal);
+            BridgeResponse response = request.WaitForResponse(import ? ImportTimeoutMs : MainThreadTimeoutMs);
+            return response ?? BridgeResponse.Error(503, import
+                ? "import did not finish within 15 minutes; it may still be running, see GET /import/status"
+                : "simulation thread did not respond within 10s (game still loading, or bridge system disabled)");
         }
 
         private static BridgeResponse HandlePing()

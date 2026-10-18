@@ -49,6 +49,11 @@ namespace CS2MCP
 
         public BridgeResponse Handle(BridgeRequest request)
         {
+            if (request.Path.StartsWith("/build/", StringComparison.Ordinal)
+                && World.GetOrCreateSystemManaged<BridgeImportToolSystem>().IsBusy)
+            {
+                return BridgeResponse.Error(409, "a network import is running; wait for it (GET /import/status) and retry");
+            }
             switch (request.Path)
             {
                 case "/state":
@@ -179,6 +184,12 @@ namespace CS2MCP
                     return ListLineVehicles(request);
                 case "/transit/lines/vehicles/set":
                     return SetLineVehicles(request);
+                case "/import/network":
+                    return ImportNetwork(request);
+                case "/import/status":
+                    return ImportStatus();
+                case "/import/undo":
+                    return UndoImport(request);
                 default:
                     return BridgeResponse.Error(404,
                         $"unknown endpoint: {request.Path}; available: /ping /state /city/overview /city/demand " +
@@ -376,7 +387,9 @@ namespace CS2MCP
             GameManager manager = GameManager.instance;
             if (manager == null || manager.gameMode != GameMode.Game)
             {
-                error = BridgeResponse.Error(409, "no city loaded (in main menu or editor); load a save first");
+                error = BridgeResponse.Error(409, manager != null && manager.gameMode == GameMode.Editor
+                    ? "this endpoint needs a city and is not available in the editor"
+                    : "no city loaded (in main menu or editor); load a save first");
                 return false;
             }
 
@@ -387,6 +400,31 @@ namespace CS2MCP
                 return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Gate for endpoints that only need the world (terrain, networks,
+        /// prefabs, tools), not a city: true in a loaded city (exactly as
+        /// TryGetCity) and, as an explicit editor branch, in the map/asset
+        /// editor, where no city entity exists. In the editor milestone locks
+        /// do not apply, so callers skip their locked-prefab checks.
+        /// </summary>
+        private bool TryGetCityOrEditor(out bool editor, out BridgeResponse error)
+        {
+            editor = false;
+            GameManager manager = GameManager.instance;
+            if (manager != null && manager.gameMode == GameMode.Editor)
+            {
+                if (manager.isGameLoading)
+                {
+                    error = BridgeResponse.Error(409, "the editor is still loading, try again shortly");
+                    return false;
+                }
+                editor = true;
+                error = null;
+                return true;
+            }
+            return TryGetCity(out _, out error);
         }
 
         private static string SafeGameDateTime(TimeSystem time)

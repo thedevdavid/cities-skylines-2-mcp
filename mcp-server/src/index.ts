@@ -9,15 +9,16 @@
 import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
 const BRIDGE_URL = (process.env.CS2_BRIDGE_URL ?? "http://127.0.0.1:8642").replace(/\/+$/, "");
 
 class BridgeError extends Error {}
 
-async function bridgeFetch(path: string, timeoutMs: number): Promise<Response> {
+async function bridgeFetch(path: string, timeoutMs: number, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(`${BRIDGE_URL}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
+    return await fetch(`${BRIDGE_URL}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     throw new BridgeError(
       `Cannot reach the CS2 bridge at ${BRIDGE_URL} (${(err as Error).message}). ` +
@@ -26,8 +27,8 @@ async function bridgeFetch(path: string, timeoutMs: number): Promise<Response> {
   }
 }
 
-async function bridgeJson(path: string, timeoutMs = 12_000): Promise<unknown> {
-  const res = await bridgeFetch(path, timeoutMs);
+async function bridgeJson(path: string, timeoutMs = 12_000, init?: RequestInit): Promise<unknown> {
+  const res = await bridgeFetch(path, timeoutMs, init);
   const text = await res.text();
   let payload: unknown;
   try {
@@ -1630,6 +1631,137 @@ server.registerTool(
     if (force !== undefined) params.set("force", String(force));
     try {
       return jsonResult(await bridgeJson(`/transit/lines/vehicles/set?${bridgeQueryString(params)}`));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+// ---- Network import (map editor or city) ----
+
+const IMPORT_TIMEOUT_MS = 16 * 60_000;
+
+/** POSTs JSON; on a bridge error the whole payload is returned (import validation lists every problem). */
+async function bridgePost(path: string, body: unknown, timeoutMs: number): Promise<{ ok: boolean; payload: unknown }> {
+  const res = await bridgeFetch(path, timeoutMs, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  try {
+    return { ok: res.ok, payload: JSON.parse(text) };
+  } catch {
+    return { ok: res.ok, payload: { raw: text, status: res.status } };
+  }
+}
+
+const importPoint = z.tuple([z.number(), z.number(), z.number()]);
+
+server.registerTool(
+  "cs2_import_network",
+  {
+    title: "Import a road/track network in one batch",
+    description:
+      "Build a whole network from a node-and-edge graph (format in IMPORT_SCHEMA.md): node entities are created " +
+      "first, then every edge attaches to them by entity, in validated batches through the game's tool pipeline. " +
+      "Works in the map editor and in a city. Pass either 'file' (path to a JSON file with {nodes, edges, options}) " +
+      "or nodes+edges inline. Returns created/failed per edge with the game's validation errors, and an importId " +
+      "that cs2_undo_import can remove again. Try options.dryRun first to validate prefab names and ids.",
+    inputSchema: {
+      file: z.string().optional().describe("Path to an import JSON file (read by the MCP server)"),
+      name: z.string().optional().describe("Label stored with the import"),
+      nodes: z
+        .array(
+          z.object({
+            id: z.union([z.string(), z.number()]),
+            x: z.number(),
+            y: z.number().optional(),
+            z: z.number(),
+            elevation: z.number().optional(),
+            entity: z.object({ index: z.number().int(), version: z.number().int() }).optional(),
+          }),
+        )
+        .optional(),
+      edges: z
+        .array(
+          z.object({
+            id: z.union([z.string(), z.number()]),
+            a: z.union([z.string(), z.number()]),
+            b: z.union([z.string(), z.number()]),
+            prefab: z.string(),
+            control: z.array(importPoint).min(1).max(2).optional(),
+            elevation: z.tuple([z.number(), z.number()]).optional(),
+          }),
+        )
+        .optional(),
+      options: z
+        .object({
+          batchSize: z.number().int().min(1).max(512).optional(),
+          nodesFirst: z.boolean().optional(),
+          heightMode: z.enum(["elevation", "absolute"]).optional(),
+          settleFrames: z.number().int().min(1).max(30).optional(),
+          dryRun: z.boolean().optional(),
+        })
+        .optional(),
+    },
+  },
+  async ({ file, name, nodes, edges, options }) => {
+    try {
+      let body: Record<string, unknown>;
+      if (file) {
+        body = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      } else if (nodes && edges) {
+        body = { nodes, edges };
+      } else {
+        return errorResult(new Error("pass 'file', or both 'nodes' and 'edges'"));
+      }
+      if (name !== undefined) body.name = name;
+      if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      const { ok, payload } = await bridgePost("/import/network", body, IMPORT_TIMEOUT_MS);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_import_status",
+  {
+    title: "Network import progress",
+    description:
+      "Progress of the running cs2_import_network (or undo), or the full report of the last finished one, plus " +
+      "how many imports can still be undone.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      return jsonResult(await bridgeJson("/import/status"));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_undo_import",
+  {
+    title: "Undo the last network import",
+    description:
+      "Bulldoze every segment (and leftover standalone node) that the most recent cs2_import_network created. " +
+      "Imports are undone newest first; the record lives in game memory only, so it is gone after a game restart. " +
+      "Segments the user connected to imported ones afterwards are not touched.",
+    inputSchema: {
+      importId: z.string().optional().describe("Must equal the newest importId, as a safety check"),
+    },
+  },
+  async ({ importId }) => {
+    const params = new URLSearchParams();
+    if (importId) params.set("id", importId);
+    try {
+      const { ok, payload } = await bridgePost(`/import/undo?${bridgeQueryString(params)}`, undefined, IMPORT_TIMEOUT_MS);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
     } catch (err) {
       return errorResult(err);
     }

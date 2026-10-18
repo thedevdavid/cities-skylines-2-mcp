@@ -143,7 +143,7 @@ namespace CS2MCP
 
         private BridgeResponse ListRoads(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }
@@ -201,7 +201,7 @@ namespace CS2MCP
 
         private BridgeResponse GetPrefabs(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out bool editor, out BridgeResponse error))
             {
                 return error;
             }
@@ -255,7 +255,7 @@ namespace CS2MCP
                         {
                             name = prefab.name,
                             type = prefab.GetType().Name,
-                            locked = IsLocked(entity),
+                            locked = !editor && IsLocked(entity),
                         });
                     }
                 }
@@ -267,7 +267,7 @@ namespace CS2MCP
                 totalMatches = total,
                 returned = results.Count,
                 note = "use the exact 'name' value with /build/place; locked prefabs need milestone progress",
-                stalenessWarning = LockStalenessWarning,
+                stalenessWarning = editor ? null : LockStalenessWarning,
                 prefabs = results,
             });
         }
@@ -323,7 +323,7 @@ namespace CS2MCP
 
         private BridgeResponse BuildRoad(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out bool editor, out BridgeResponse error))
             {
                 return error;
             }
@@ -352,7 +352,7 @@ namespace CS2MCP
             {
                 return BridgeResponse.Error(404, $"unknown network prefab '{prefabName}'; search via /prefabs?category=road|net&query=...");
             }
-            if (IsLocked(prefabEntity) && !IsForced(request))
+            if (!editor && IsLocked(prefabEntity) && !IsForced(request))
             {
                 return BridgeResponse.Error(409, $"prefab '{prefab.name}' is locked (milestone not reached); pass force=true to build anyway");
             }
@@ -511,7 +511,7 @@ namespace CS2MCP
 
         private BridgeResponse Demolish(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }

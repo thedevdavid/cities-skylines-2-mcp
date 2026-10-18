@@ -122,7 +122,7 @@ namespace CS2MCP
 
         private BridgeResponse GetTerrain(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }
@@ -418,7 +418,7 @@ namespace CS2MCP
 
         private BridgeResponse InspectEntity(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }

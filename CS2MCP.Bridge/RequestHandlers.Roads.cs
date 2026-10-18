@@ -24,7 +24,7 @@ namespace CS2MCP
     {
         private BridgeResponse ConnectRoad(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out bool editor, out BridgeResponse error))
             {
                 return error;
             }
@@ -42,7 +42,7 @@ namespace CS2MCP
             {
                 return BridgeResponse.Error(404, $"unknown network prefab '{prefabName}' (see cs2_find_prefabs category road or net)");
             }
-            if (IsLocked(prefabEntity) && !IsForced(request))
+            if (!editor && IsLocked(prefabEntity) && !IsForced(request))
             {
                 return BridgeResponse.Error(409, $"prefab '{prefab.name}' is locked (milestone not reached); pass force=true to build anyway");
             }

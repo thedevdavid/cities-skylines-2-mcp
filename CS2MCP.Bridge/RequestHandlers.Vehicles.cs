@@ -376,7 +376,7 @@ namespace CS2MCP
 
         private BridgeResponse RoadGraph(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }
