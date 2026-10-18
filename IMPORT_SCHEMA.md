@@ -1,12 +1,13 @@
 # Network import format (`POST /import/network`)
 
-The bridge builds a whole road/track network from a node-and-edge graph. It works in the **map editor** and in a loaded city. MCP tools: `cs2_import_network`, `cs2_import_status`, `cs2_undo_import`. CLI: `node scripts/import-network.mjs <file>`.
+The bridge builds a whole road/track network from a node-and-edge graph. It works in the **map editor** and in a loaded city. MCP tools: `cs2_import_network`, `cs2_import_status`, `cs2_import_report`, `cs2_undo_import`. CLI: `node scripts/import-network.mjs <file>`.
 
 ## Endpoints
 
 | Method and path | Purpose |
 |---|---|
 | `POST /import/network` | Body below. Blocks until every batch is done (up to 15 min), then returns the report. |
+| `GET /import/report?status=&prefab=&offset=&limit=` | Pages through the last import's per-edge results (limit default 200, max 1000). |
 | `GET /import/status` | Progress of the running import or undo, or the last report. |
 | `POST /import/undo[?id=<importId>]` | Bulldozes what the newest import created. `id`, if given, must be the newest one. |
 
@@ -25,7 +26,7 @@ While an import runs, every `/build/*` endpoint answers 409.
     { "id": "e1", "a": "n0", "b": "n1", "prefab": "Highway Twoway - 4 lanes",
       "control": [[40, 0, 5], [80, 0, 5]], "elevation": [0, 0] }
   ],
-  "options": { "batchSize": 64, "nodesFirst": true, "heightMode": "elevation", "settleFrames": 1, "dryRun": false }
+  "options": { "batchSize": 64, "nodesFirst": true, "heightMode": "elevation", "settleFrames": 1, "dryRun": false, "report": "summary" }
 }
 ```
 
@@ -60,42 +61,54 @@ End-to-end length must be 4–1500 m. The game may split an edge into several se
 | Option | Default | Meaning |
 |---|---|---|
 | `batchSize` | 64 | Definitions per batch (1–512). |
-| `nodesFirst` | true | Create every node as a standalone node entity first, then attach all edges to node entities. If the game rejects or ignores standalone nodes, the importer falls back automatically (see below) and says so in `nodesFirst.fallbackReason`. |
+| `nodesFirst` | true | Create every node as a standalone node entity first, then attach all edges to node entities. Judged per network prefab: if the game rejects or ignores standalone nodes of one prefab (the first one tried fails before any succeeds), that prefab's nodes fall back to free edge ends (see below) and `nodesFirst.refusedPrefabs` says why; other prefabs keep nodes-first. |
 | `heightMode` | `"elevation"` | `"absolute"` derives missing `elevation` from `y`. |
 | `settleFrames` | 1 | Tool frames with `applyMode = None` between creating definitions and applying (1–30). Raise it if large batches are rejected for no stated reason. |
 | `dryRun` | false | Validate ids, references, prefab names and lengths; build nothing. |
+| `report` | `"summary"` | `"full"` adds every per-edge result to the response. Large imports should keep the summary and page with `GET /import/report`. |
 
 ## How it builds
 
 1. **Validate** the whole body. Any problem (unknown prefab, dangling node id, duplicate id, bad length) rejects the request with HTTP 400 and a `problems` list; nothing is built.
 2. **Nodes first.** Each node without an entity becomes a zero-length course (`NetCourse` with start = end, prefab of the first edge using it), the single-point branch of `GenerateNodesSystem`. After the batch is applied, the new node entities are found by diffing against a snapshot taken before the batch, and matched to the import nodes by position (within 0.75 m).
-3. **Edges.** Each edge is one `CreationDefinition` + `NetCourse` whose ends carry the node entity in `CoursePos.m_Entity` (attached ends keep the node's height and never get `FreeHeight`). New segments are found by diffing and matched to the edge's course.
-4. **Fallback** when standalone nodes do not work: edges are built with free ends. Within one batch, free ends at bit-identical positions merge into one node (that is how `GenerateNodesSystem` keys new nodes), and every node is resolved to its entity after its first batch, so later batches attach by entity.
-5. **Batches** use the vanilla tool handshake through `ToolOutputBarrier`: `Clear` (definitions) → `None` (preview generated and validated, `settleFrames` frames) → `Apply` if `GetAllowApply()` → `None` (resolve). A rejected batch is split in half and retried until single items remain, so a bad edge fails alone, with the game's error names (`ToolErrorData`).
+3. **Edges.** Each edge is one `CreationDefinition` + `NetCourse` whose ends carry the node entity in `CoursePos.m_Entity` (attached ends keep the node's height and never get `FreeHeight`).
+4. **Detection.** An edge counts as built when three points along its course (t = 0.2, 0.5, 0.8) each lie within half the prefab width (+0.5 m) of a segment of the same prefab that is new in the batch or was created earlier by this import. `created` = one segment spans exactly the course. `merged` = the game joined collinear courses of one prefab into a longer segment and dropped the node between them; the covering segment is listed in `segments` and in `error`, and is recorded for undo.
+5. **Merged nodes.** A node that the game dropped this way is `absorbed`. A later edge that ends there attaches by splitting the covering segment (`CoursePos.m_Entity` = segment, `m_SplitPosition` = t), as the road tool does when it snaps onto a segment, so T-junctions still connect.
+6. **Fallback** when standalone nodes do not work: edges are built with free ends. Within one batch, free ends at bit-identical positions merge into one node (that is how `GenerateNodesSystem` keys new nodes), and every node is resolved to its entity after its first batch, so later batches attach by entity.
+7. **Batches** use the vanilla tool handshake through `ToolOutputBarrier`: `Clear` (definitions) → `None` (preview generated and validated, `settleFrames` frames) → `Apply` if `GetAllowApply()` → `None` (resolve). A rejected batch is split in half and retried until single items remain, so a bad edge fails alone, with the game's error names (`ToolErrorData`).
 
 ## Report
+
+Default (`report: "summary"`), sized for an MCP client even for thousands of edges:
 
 ```json
 {
   "importId": "imp-20261018-101500-1",
   "completed": true,
   "abortReason": null,
-  "edges": { "requested": 10, "created": 10, "failed": 0, "notRun": 0 },
-  "nodes": { "requested": 11, "resolved": 11 },
-  "nodesFirst": { "used": true, "fallbackReason": null },
-  "batches": { "applied": 2, "rejected": 0 },
-  "frames": 9, "seconds": 0.3,
-  "undo": { "segmentsRecorded": 10, "nodesRecorded": 11, "note": "..." },
-  "warnings": [],
+  "edges": { "requested": 1530, "created": 1205, "merged": 320, "failed": 5, "notRun": 0 },
+  "byPrefab": { "Highway Oneway - 2 lanes": { "created": 900, "merged": 250, "failed": 2 } },
+  "nodes": { "used": 1600, "resolved": 1420, "absorbedIntoMergedSegments": 180, "unresolved": 0, "standaloneCreated": 1590 },
+  "nodesFirst": { "enabled": true, "refusedPrefabs": [] },
+  "batches": { "applied": 52, "rejected": 3 },
+  "frames": 230, "seconds": 4.3,
+  "undo": { "segmentsRecorded": 1300, "nodesRecorded": 1590, "note": "..." },
+  "warningCount": 0, "warnings": [],
+  "failedEdges": [{ "id": "e17", "prefab": "...", "error": "blocked by game validation (SteepSlope)" }],
   "unresolvedNodes": [],
-  "results": [
-    { "id": "e1", "status": "created", "error": null, "prefab": "Highway Twoway - 4 lanes",
-      "segments": [{ "index": 5120, "version": 1 }], "nodeA": { "index": 5101, "version": 1 }, "nodeB": { "index": 5102, "version": 1 } }
-  ]
+  "note": "...",
+  "results": null
 }
 ```
 
-`status` is `created`, `failed` (with `error`) or `pending` (the import was aborted before that edge ran, for example because the user picked another tool). `completed: false` with an `abortReason` means the import stopped early; what was built is still recorded for undo.
+`failedEdges`, `unresolvedNodes` and `warnings` are capped at 200 entries. Per-edge results (`GET /import/report`, or `results` with `report: "full"`):
+
+```json
+{ "id": "e1", "status": "merged", "error": "merged by the game into segment 5120:1 (...)", "prefab": "Highway Twoway - 4 lanes",
+  "segments": [{ "index": 5120, "version": 1 }], "nodeA": { "index": 5101, "version": 1 }, "nodeB": null }
+```
+
+`status` is `created`, `merged` (built, inside a longer segment), `failed` (with `error`) or `pending` (the import stopped before that edge ran, for example because the user picked another tool). `nodeA`/`nodeB` are null for absorbed nodes. `completed: false` with an `abortReason` means the import stopped early; what was built is still recorded for undo.
 
 ## Undo
 

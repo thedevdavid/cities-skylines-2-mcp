@@ -5,9 +5,10 @@
 //   node scripts/import-network.mjs <file> --dry-run       validate only, build nothing
 //   node scripts/import-network.mjs --status                progress / last report
 //   node scripts/import-network.mjs --undo [--id <importId>] remove the newest import
+//   node scripts/import-network.mjs --report [failed|merged|created] [--prefab P] [--offset N --limit N]
 //
 // Options: --at X,Z (translate all x/z, including control points), --batch N,
-// --no-nodes-first, --settle N, --full (print every per-edge result).
+// --no-nodes-first, --settle N, --full (ask the bridge for every per-edge result).
 // Bridge URL: CS2_BRIDGE_URL (default http://127.0.0.1:8642). Node 18+.
 import { readFile } from "node:fs/promises";
 
@@ -15,7 +16,7 @@ const BRIDGE = (process.env.CS2_BRIDGE_URL ?? "http://127.0.0.1:8642").replace(/
 const TIMEOUT_MS = 16 * 60_000;
 
 function parseArgs(argv) {
-  const args = { file: null, at: null, dryRun: false, status: false, undo: false, id: null, batch: null, nodesFirst: null, settle: null, full: false };
+  const args = { file: null, at: null, dryRun: false, status: false, report: null, prefab: null, offset: null, limit: null, undo: false, id: null, batch: null, nodesFirst: null, settle: null, full: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--at") {
@@ -25,6 +26,10 @@ function parseArgs(argv) {
     } else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--status") args.status = true;
     else if (a === "--undo") args.undo = true;
+    else if (a === "--report") args.report = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : "";
+    else if (a === "--prefab") args.prefab = argv[++i];
+    else if (a === "--offset") args.offset = Number(argv[++i]);
+    else if (a === "--limit") args.limit = Number(argv[++i]);
     else if (a === "--id") args.id = argv[++i];
     else if (a === "--batch") args.batch = Number(argv[++i]);
     else if (a === "--no-nodes-first") args.nodesFirst = false;
@@ -71,17 +76,17 @@ function translate(doc, at) {
   }
 }
 
-function summarize(report, full) {
-  if (!report.results) return report;
-  const { results, ...rest } = report;
-  const failed = results.filter((r) => r.status !== "created");
-  return { ...rest, failedEdges: failed, results: full ? results : `${results.length} per-edge results (use --full)` };
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   let out;
-  if (args.status) {
+  if (args.report !== null) {
+    const params = new URLSearchParams();
+    if (args.report) params.set("status", args.report);
+    if (args.prefab) params.set("prefab", args.prefab);
+    if (args.offset !== null) params.set("offset", String(args.offset));
+    if (args.limit !== null) params.set("limit", String(args.limit));
+    out = await call("GET", `/import/report?${params}`);
+  } else if (args.status) {
     out = await call("GET", "/import/status");
   } else if (args.undo) {
     out = await call("POST", `/import/undo${args.id ? `?id=${encodeURIComponent(args.id)}` : ""}`);
@@ -94,9 +99,9 @@ async function main() {
     if (args.batch) doc.options.batchSize = args.batch;
     if (args.nodesFirst === false) doc.options.nodesFirst = false;
     if (args.settle) doc.options.settleFrames = args.settle;
+    if (args.full) doc.options.report = "full";
     console.error(`posting ${doc.nodes.length} nodes / ${doc.edges.length} edges to ${BRIDGE}/import/network ...`);
     out = await call("POST", "/import/network", doc);
-    out.payload = summarize(out.payload, args.full);
   }
   console.log(JSON.stringify(out.payload, null, 2));
   if (out.status !== 200) process.exitCode = 1;

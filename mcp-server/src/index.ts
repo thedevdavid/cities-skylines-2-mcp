@@ -1666,8 +1666,9 @@ server.registerTool(
       "Build a whole network from a node-and-edge graph (format in IMPORT_SCHEMA.md): node entities are created " +
       "first, then every edge attaches to them by entity, in validated batches through the game's tool pipeline. " +
       "Works in the map editor and in a city. Pass either 'file' (path to a JSON file with {nodes, edges, options}) " +
-      "or nodes+edges inline. Returns created/failed per edge with the game's validation errors, and an importId " +
-      "that cs2_undo_import can remove again. Try options.dryRun first to validate prefab names and ids.",
+      "or nodes+edges inline. Returns a compact summary (counts per status and prefab, failed ids with the game's " +
+      "validation errors) and an importId that cs2_undo_import can remove again; cs2_import_report pages through " +
+      "every per-edge result. Try options.dryRun first to validate prefab names and ids.",
     inputSchema: {
       file: z.string().optional().describe("Path to an import JSON file (read by the MCP server)"),
       name: z.string().optional().describe("Label stored with the import"),
@@ -1702,6 +1703,10 @@ server.registerTool(
           heightMode: z.enum(["elevation", "absolute"]).optional(),
           settleFrames: z.number().int().min(1).max(30).optional(),
           dryRun: z.boolean().optional(),
+          report: z
+            .enum(["summary", "full"])
+            .optional()
+            .describe("summary (default): counts per status and prefab plus failed ids; full adds every per-edge result (large)"),
         })
         .optional(),
     },
@@ -1738,6 +1743,35 @@ server.registerTool(
   async () => {
     try {
       return jsonResult(await bridgeJson("/import/status"));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_import_report",
+  {
+    title: "Per-edge results of the last import",
+    description:
+      "Page through the per-edge results of the last cs2_import_network: status (created / merged / failed / " +
+      "pending), error, covering segment entities and node entities. Filter by status and prefab name. " +
+      "'merged' means the edge exists inside a longer segment the game joined from collinear courses.",
+    inputSchema: {
+      status: z.enum(["created", "merged", "failed", "pending"]).optional(),
+      prefab: z.string().optional().describe("Only prefabs whose name contains this"),
+      offset: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(1000).optional().describe("Default 200"),
+    },
+  },
+  async ({ status, prefab, offset, limit }) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (prefab) params.set("prefab", prefab);
+    if (offset !== undefined) params.set("offset", String(offset));
+    if (limit !== undefined) params.set("limit", String(limit));
+    try {
+      return jsonResult(await bridgeJson(`/import/report?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }

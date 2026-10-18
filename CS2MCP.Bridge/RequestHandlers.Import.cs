@@ -51,6 +51,7 @@ namespace CS2MCP
             public string heightMode;
             public int? settleFrames;
             public bool? dryRun;
+            public string report;
         }
 
         public sealed class ImportRequestDto
@@ -69,6 +70,15 @@ namespace CS2MCP
         private BridgeResponse ImportStatus()
         {
             return BridgeResponse.Json(World.GetOrCreateSystemManaged<BridgeImportToolSystem>().Status());
+        }
+
+        private BridgeResponse ImportReport(BridgeRequest request)
+        {
+            request.Query.TryGetValue("status", out string status);
+            request.Query.TryGetValue("prefab", out string prefab);
+            int offset = request.TryGetInt("offset", out int rawOffset) ? math.max(rawOffset, 0) : 0;
+            int limit = request.TryGetInt("limit", out int rawLimit) ? math.clamp(rawLimit, 1, 1000) : 200;
+            return BridgeResponse.Json(World.GetOrCreateSystemManaged<BridgeImportToolSystem>().QueryResults(status, prefab, offset, limit));
         }
 
         private BridgeResponse UndoImport(BridgeRequest request)
@@ -143,6 +153,7 @@ namespace CS2MCP
                 BatchSize = math.clamp(options.batchSize ?? 64, 1, 512),
                 NodesFirst = options.nodesFirst ?? true,
                 SettleFrames = math.clamp(options.settleFrames ?? 1, 1, 30),
+                FullReport = string.Equals(options.report, "full", StringComparison.OrdinalIgnoreCase),
             };
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
@@ -262,6 +273,7 @@ namespace CS2MCP
                     if (node.CreatePrefab == Entity.Null)
                     {
                         node.CreatePrefab = prefabEntity;
+                        node.CreatePrefabName = dto.prefab;
                         float2 other = job.Nodes[end == a ? b : a].XZ;
                         node.Direction = math.normalizesafe(other - node.XZ);
                     }

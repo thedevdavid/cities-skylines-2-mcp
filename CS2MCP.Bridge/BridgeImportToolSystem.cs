@@ -49,7 +49,10 @@ namespace CS2MCP
             public bool Given;
             public bool CreatedHere;
             public Entity CreatePrefab;
+            public string CreatePrefabName;
             public float2 Direction;
+            /// <summary>No node exists here any more: the game merged the two collinear segments meeting here into one.</summary>
+            public bool Absorbed;
             public string Error;
         }
 
@@ -75,6 +78,7 @@ namespace CS2MCP
             public int BatchSize;
             public bool NodesFirst;
             public int SettleFrames;
+            public bool FullReport;
             public List<string> Warnings = new List<string>();
         }
 
@@ -128,8 +132,10 @@ namespace CS2MCP
         private ToolBaseSystem m_PreviousTool;
         private HashSet<Entity> m_NodeSnapshot;
         private HashSet<Entity> m_EdgeSnapshot;
-        private bool m_NodesFirstDisabled;
-        private string m_NodesFirstDisabledReason;
+        // Standalone nodes are judged per network prefab: one that the game refuses
+        // (e.g. a track type) falls back to free edge ends without affecting others.
+        private readonly HashSet<Entity> m_NodePrefabsAccepted = new HashSet<Entity>();
+        private readonly Dictionary<Entity, string> m_NodePrefabsRefused = new Dictionary<Entity, string>();
         private int m_NodeSuccesses;
         private int m_BatchesApplied;
         private int m_BatchesRejected;
@@ -137,6 +143,8 @@ namespace CS2MCP
         private DateTime m_Started;
 
         private readonly List<ImportRecord> m_Records = new List<ImportRecord>();
+        private readonly HashSet<Entity> m_RecordEdgeSet = new HashSet<Entity>();
+        private readonly Dictionary<Entity, float> m_HalfWidths = new Dictionary<Entity, float>();
         private object m_LastReport;
 
         private TerrainSystem m_Terrain;
@@ -199,7 +207,7 @@ namespace CS2MCP
             int failed = 0;
             foreach (ImportEdge edge in m_Job.Edges)
             {
-                if (edge.Status == "created")
+                if (edge.Status == "created" || edge.Status == "merged")
                 {
                     created++;
                 }
@@ -232,10 +240,11 @@ namespace CS2MCP
             }
             m_Job = job;
             m_Record = new ImportRecord { Id = job.Id, Name = job.Name };
+            m_RecordEdgeSet.Clear();
             m_UndoTarget = null;
             m_Queue.Clear();
-            m_NodesFirstDisabled = !job.NodesFirst;
-            m_NodesFirstDisabledReason = job.NodesFirst ? null : "disabled by options.nodesFirst=false";
+            m_NodePrefabsAccepted.Clear();
+            m_NodePrefabsRefused.Clear();
             m_NodeSuccesses = 0;
             m_BatchesApplied = 0;
             m_BatchesRejected = 0;
@@ -409,9 +418,13 @@ namespace CS2MCP
             {
                 m_Current = m_Queue[0];
                 m_Queue.RemoveAt(0);
-                if (m_Current.Kind == ItemKind.Nodes && m_NodesFirstDisabled)
+                if (m_Current.Kind == ItemKind.Nodes)
                 {
-                    continue;
+                    m_Current.Indices.RemoveAll(i => m_NodePrefabsRefused.ContainsKey(m_Job.Nodes[i].CreatePrefab));
+                    if (m_Current.Indices.Count == 0)
+                    {
+                        continue;
+                    }
                 }
 
                 TakeSnapshot();
@@ -516,14 +529,20 @@ namespace CS2MCP
 
             ImportNode node = m_Job.Nodes[single];
             node.Error = "standalone node " + reason;
-            if (m_NodeSuccesses == 0)
+            if (!m_NodePrefabsAccepted.Contains(node.CreatePrefab))
             {
-                // The game refuses standalone nodes of this kind altogether; build
-                // edges with free ends instead (their nodes are resolved after each batch).
-                m_NodesFirstDisabled = true;
-                m_NodesFirstDisabledReason = "the first standalone node was rejected (" + node.Error +
-                    "); fell back to edges with free ends, resolved to node entities after each batch";
-                m_Queue.RemoveAll(item => item.Kind == ItemKind.Nodes);
+                // The game refuses standalone nodes of this prefab; its nodes get
+                // free edge ends instead (resolved to node entities after each batch).
+                RefuseNodePrefab(node, "the first standalone node of this prefab was rejected (" + node.Error + ")");
+            }
+        }
+
+        private void RefuseNodePrefab(ImportNode node, string reason)
+        {
+            if (!m_NodePrefabsRefused.ContainsKey(node.CreatePrefab))
+            {
+                m_NodePrefabsRefused[node.CreatePrefab] = (node.CreatePrefabName ?? "?") + ": " + reason +
+                    "; its nodes were built as free edge ends instead";
             }
         }
 
@@ -604,6 +623,93 @@ namespace CS2MCP
             commandBuffer.AddComponent(entity, course);
         }
 
+        private struct EndInfo
+        {
+            public Entity Entity;
+            public float Split;
+            public float3 Position;
+            public float Elevation;
+        }
+
+        /// <summary>
+        /// Where an edge end attaches: the import node's entity if it still exists;
+        /// else, if the game merged the segments through that node (it drops a node
+        /// between two collinear segments of the same prefab), a split of the
+        /// imported segment that now runs through the point (CoursePos.m_Entity =
+        /// segment + m_SplitPosition, as the road tool snaps onto a segment); else
+        /// a free point at terrain + elevation.
+        /// </summary>
+        private EndInfo ResolveEnd(ImportNode node, ref TerrainHeightData heightData)
+        {
+            if (node.Entity != Entity.Null
+                && (!EntityManager.Exists(node.Entity) || !EntityManager.HasComponent<Node>(node.Entity)
+                    || EntityManager.HasComponent<Deleted>(node.Entity)))
+            {
+                node.Entity = Entity.Null;
+                node.Absorbed = true;
+            }
+            if (node.Entity != Entity.Null)
+            {
+                float3 position = NodePosition(node, ref heightData, out float elevation);
+                return new EndInfo { Entity = node.Entity, Position = position, Elevation = elevation };
+            }
+            if (node.Absorbed && FindRecordedSegmentAt(node.XZ, out Entity segment, out float t))
+            {
+                Bezier4x3 curve = EntityManager.GetComponentData<Curve>(segment).m_Bezier;
+                float elevation = EntityManager.HasComponent<Game.Net.Elevation>(segment)
+                    ? math.csum(EntityManager.GetComponentData<Game.Net.Elevation>(segment).m_Elevation) * 0.5f
+                    : 0f;
+                if (t < 0.02f || t > 0.98f)
+                {
+                    Edge ends = EntityManager.GetComponentData<Edge>(segment);
+                    Entity endNode = t < 0.02f ? ends.m_Start : ends.m_End;
+                    node.Entity = endNode;
+                    node.Absorbed = false;
+                    float3 nodePosition = NodePosition(node, ref heightData, out float nodeElevation);
+                    return new EndInfo { Entity = endNode, Position = nodePosition, Elevation = nodeElevation };
+                }
+                return new EndInfo { Entity = segment, Split = t, Position = MathUtils.Position(curve, t), Elevation = elevation };
+            }
+            float3 free = NodePosition(node, ref heightData, out float freeElevation);
+            return new EndInfo { Position = free, Elevation = freeElevation };
+        }
+
+        /// <summary>The nearest segment this import created that passes within 1 m of the point.</summary>
+        private bool FindRecordedSegmentAt(float2 point, out Entity segment, out float t)
+        {
+            segment = Entity.Null;
+            t = 0f;
+            float best = 1f;
+            foreach (Entity candidate in m_RecordEdgeSet)
+            {
+                if (!EntityManager.Exists(candidate) || !EntityManager.HasComponent<Edge>(candidate)
+                    || EntityManager.HasComponent<Deleted>(candidate))
+                {
+                    continue;
+                }
+                Bezier4x3 curve = EntityManager.GetComponentData<Curve>(candidate).m_Bezier;
+                if (!InBounds(curve.xz, point, best))
+                {
+                    continue;
+                }
+                float distance = MathUtils.Distance(curve.xz, point, out float candidateT);
+                if (distance < best)
+                {
+                    best = distance;
+                    segment = candidate;
+                    t = candidateT;
+                }
+            }
+            return segment != Entity.Null;
+        }
+
+        private static bool InBounds(Bezier4x2 curve, float2 point, float margin)
+        {
+            float2 min = math.min(math.min(curve.a, curve.b), math.min(curve.c, curve.d)) - margin;
+            float2 max = math.max(math.max(curve.a, curve.b), math.max(curve.c, curve.d)) + margin;
+            return math.all(point >= min) && math.all(point <= max);
+        }
+
         /// <summary>
         /// One course per edge, mirroring BridgeRoadToolSystem's connected build
         /// (NetToolSystem.CreateDefinitionsJob.CreateStraightLine): ends with a
@@ -618,25 +724,22 @@ namespace CS2MCP
             }
             ImportNode nodeA = m_Job.Nodes[edge.A];
             ImportNode nodeB = m_Job.Nodes[edge.B];
-            if (nodeA.Entity != Entity.Null && !EntityManager.Exists(nodeA.Entity))
-            {
-                nodeA.Entity = Entity.Null;
-            }
-            if (nodeB.Entity != Entity.Null && !EntityManager.Exists(nodeB.Entity))
-            {
-                nodeB.Entity = Entity.Null;
-            }
-            if (nodeA.Entity != Entity.Null && nodeA.Entity == nodeB.Entity)
+            EndInfo endA = ResolveEnd(nodeA, ref heightData);
+            EndInfo endB = ResolveEnd(nodeB, ref heightData);
+            if (endA.Entity != Entity.Null && endA.Entity == endB.Entity
+                && (endA.Split == 0f || math.abs(endA.Split - endB.Split) < 0.01f))
             {
                 edge.Status = "failed";
-                edge.Error = $"both ends resolved to the same node entity {nodeA.Entity.Index}:{nodeA.Entity.Version}";
+                edge.Error = $"both ends resolved to the same entity {endA.Entity.Index}:{endA.Entity.Version}";
                 return false;
             }
 
-            float3 start = NodePosition(nodeA, ref heightData, out float startElevation);
-            float3 end = NodePosition(nodeB, ref heightData, out float endElevation);
-            bool startAttached = nodeA.Entity != Entity.Null;
-            bool endAttached = nodeB.Entity != Entity.Null;
+            float3 start = endA.Position;
+            float3 end = endB.Position;
+            float startElevation = endA.Elevation;
+            float endElevation = endB.Elevation;
+            bool startAttached = endA.Entity != Entity.Null;
+            bool endAttached = endB.Entity != Entity.Null;
 
             Bezier4x3 bezier;
             if (edge.Control != null && edge.Control.Length == 2)
@@ -670,7 +773,8 @@ namespace CS2MCP
             course.m_Elevation = new float2(math.min(startElevation, endElevation), math.max(startElevation, endElevation));
             course.m_StartPosition = new CoursePos
             {
-                m_Entity = nodeA.Entity,
+                m_Entity = endA.Entity,
+                m_SplitPosition = endA.Split,
                 m_Position = start,
                 m_Elevation = startElevation,
                 m_Rotation = NetUtils.GetNodeRotation(MathUtils.StartTangent(bezier)),
@@ -680,7 +784,8 @@ namespace CS2MCP
             };
             course.m_EndPosition = new CoursePos
             {
-                m_Entity = nodeB.Entity,
+                m_Entity = endB.Entity,
+                m_SplitPosition = endB.Split,
                 m_Position = end,
                 m_Elevation = endElevation,
                 m_Rotation = NetUtils.GetNodeRotation(MathUtils.EndTangent(bezier)),
@@ -826,77 +931,154 @@ namespace CS2MCP
                 node.CreatedHere = true;
                 node.Error = null;
                 m_NodeSuccesses++;
+                m_NodePrefabsAccepted.Add(node.CreatePrefab);
                 m_Record.Nodes.Add(best);
             }
-            if (m_NodeSuccesses == 0)
+            foreach (int index in m_Current.Indices)
             {
-                m_NodesFirstDisabled = true;
-                m_NodesFirstDisabledReason = "a standalone-node batch was applied but produced no node entities; " +
-                    "fell back to edges with free ends, resolved to node entities after each batch";
-                m_Queue.RemoveAll(item => item.Kind == ItemKind.Nodes);
+                ImportNode node = m_Job.Nodes[index];
+                if (node.Entity == Entity.Null && !m_NodePrefabsAccepted.Contains(node.CreatePrefab))
+                {
+                    RefuseNodePrefab(node, "a standalone-node batch was applied but produced no node entities");
+                }
             }
         }
 
+        /// <summary>
+        /// A course counts as built when every sample point along it lies on a
+        /// segment of the requested prefab that is new in this batch or was
+        /// created earlier by this import. "created" = one segment spans exactly
+        /// the course; "merged" = the game joined it with neighbouring collinear
+        /// courses into a longer segment (it drops the node between two such
+        /// segments), so the covering segment is longer than the course.
+        /// </summary>
         private void ResolveEdges()
         {
-            var newEdges = new List<Entity>();
+            var candidates = new List<Entity>();
             using (NativeArray<Entity> edges = m_EdgeQuery.ToEntityArray(Allocator.Temp))
             {
                 foreach (Entity edge in edges)
                 {
-                    if (!m_EdgeSnapshot.Contains(edge))
+                    if (!m_EdgeSnapshot.Contains(edge) || m_RecordEdgeSet.Contains(edge))
                     {
-                        newEdges.Add(edge);
+                        candidates.Add(edge);
                     }
                 }
             }
+            var prefabs = new Entity[candidates.Count];
+            var curves = new Bezier4x2[candidates.Count];
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                prefabs[i] = EntityManager.GetComponentData<PrefabRef>(candidates[i]).m_Prefab;
+                curves[i] = EntityManager.GetComponentData<Curve>(candidates[i]).m_Bezier.xz;
+            }
 
-            TerrainHeightData heightData = m_Terrain.GetHeightData();
             foreach (int index in m_Current.Indices)
             {
                 ImportEdge edge = m_Job.Edges[index];
                 ImportNode nodeA = m_Job.Nodes[edge.A];
                 ImportNode nodeB = m_Job.Nodes[edge.B];
-                float2 a = nodeA.Entity != Entity.Null ? NodePosition(nodeA, ref heightData, out _).xz : nodeA.XZ;
-                float2 b = nodeB.Entity != Entity.Null ? NodePosition(nodeB, ref heightData, out _).xz : nodeB.XZ;
-                Bezier4x2 course = CourseXZ(edge, a, b);
+                Bezier4x2 course = CourseXZ(edge, nodeA.XZ, nodeB.XZ);
+                float tolerance = HalfWidth(edge.Prefab) + 0.5f;
 
-                foreach (Entity candidate in newEdges)
+                bool exact = false;
+                int covered = 0;
+                foreach (float t in kCourseSamples)
                 {
-                    if (EntityManager.GetComponentData<PrefabRef>(candidate).m_Prefab != edge.Prefab)
+                    float2 sample = MathUtils.Position(course, t);
+                    int best = -1;
+                    float bestDistance = tolerance;
+                    for (int i = 0; i < candidates.Count; i++)
+                    {
+                        if (prefabs[i] != edge.Prefab || !InBounds(curves[i], sample, bestDistance))
+                        {
+                            continue;
+                        }
+                        float distance = MathUtils.Distance(curves[i], sample, out _);
+                        if (distance < bestDistance)
+                        {
+                            bestDistance = distance;
+                            best = i;
+                        }
+                    }
+                    if (best < 0)
                     {
                         continue;
                     }
-                    Bezier4x3 bezier = EntityManager.GetComponentData<Curve>(candidate).m_Bezier;
-                    if (MathUtils.Distance(course, bezier.a.xz, out _) > kCourseMatchDistance
-                        || MathUtils.Distance(course, bezier.d.xz, out _) > kCourseMatchDistance
-                        || MathUtils.Distance(course, MathUtils.Position(bezier, 0.5f).xz, out _) > kCourseMatchDistance)
+                    covered++;
+                    if (!edge.Segments.Contains(candidates[best]))
                     {
-                        continue;
+                        edge.Segments.Add(candidates[best]);
+                        exact |= SameEnds(curves[best], course);
                     }
-                    edge.Segments.Add(candidate);
                 }
 
-                if (edge.Segments.Count == 0)
+                if (covered < kCourseSamples.Length)
                 {
                     edge.Status = "failed";
-                    edge.Error = "the batch was applied but no new segment of this prefab was found along the course";
+                    edge.Error = $"the batch was applied but only {covered} of {kCourseSamples.Length} points along the course " +
+                        "lie on a segment of this prefab";
+                    edge.Segments.Clear();
                     continue;
                 }
-                edge.Status = "created";
+                edge.Status = exact ? "created" : "merged";
+                if (!exact)
+                {
+                    var names = new List<string>();
+                    foreach (Entity segment in edge.Segments)
+                    {
+                        names.Add($"{segment.Index}:{segment.Version}");
+                    }
+                    edge.Error = "merged by the game into segment " + string.Join(", ", names) +
+                        " (collinear segments of one prefab are joined and the node between them dropped)";
+                }
                 foreach (Entity segment in edge.Segments)
                 {
-                    m_Record.Edges.Add(segment);
+                    RecordSegment(segment);
                 }
                 ResolveEndNode(nodeA, edge.Segments);
                 ResolveEndNode(nodeB, edge.Segments);
             }
         }
 
+        private static readonly float[] kCourseSamples = { 0.2f, 0.5f, 0.8f };
+
+        private static bool SameEnds(Bezier4x2 segment, Bezier4x2 course)
+        {
+            return (math.distance(segment.a, course.a) < kCourseMatchDistance && math.distance(segment.d, course.d) < kCourseMatchDistance)
+                || (math.distance(segment.a, course.d) < kCourseMatchDistance && math.distance(segment.d, course.a) < kCourseMatchDistance);
+        }
+
+        private float HalfWidth(Entity prefab)
+        {
+            if (!m_HalfWidths.TryGetValue(prefab, out float half))
+            {
+                half = EntityManager.HasComponent<NetGeometryData>(prefab)
+                    ? EntityManager.GetComponentData<NetGeometryData>(prefab).m_DefaultWidth * 0.5f
+                    : 2f;
+                half = math.max(half, 1f);
+                m_HalfWidths[prefab] = half;
+            }
+            return half;
+        }
+
+        private void RecordSegment(Entity segment)
+        {
+            if (m_RecordEdgeSet.Add(segment))
+            {
+                m_Record.Edges.Add(segment);
+            }
+        }
+
         private void ResolveEndNode(ImportNode node, List<Entity> segments)
         {
+            if (node.Entity != Entity.Null && EntityManager.Exists(node.Entity) && !EntityManager.HasComponent<Deleted>(node.Entity))
+            {
+                return;
+            }
             Entity best = Entity.Null;
             float bestDistance = kNodeMatchDistance;
+            bool onSegment = false;
             foreach (Entity segment in segments)
             {
                 Edge ends = EntityManager.GetComponentData<Edge>(segment);
@@ -913,25 +1095,28 @@ namespace CS2MCP
                         best = candidate;
                     }
                 }
+                onSegment |= MathUtils.Distance(EntityManager.GetComponentData<Curve>(segment).m_Bezier.xz, node.XZ, out _) < 1f;
             }
-            if (best == Entity.Null)
+            if (best != Entity.Null)
             {
-                if (node.Entity == Entity.Null)
+                if (!m_NodeSnapshot.Contains(best))
                 {
-                    m_Job.Warnings.Add($"node {node.Id}: no node entity found at its position after building an edge; later edges will start a new node there");
+                    m_Record.Nodes.Add(best);
+                    node.CreatedHere = true;
                 }
+                node.Entity = best;
+                node.Absorbed = false;
                 return;
             }
-            if (node.Entity != Entity.Null && node.Entity != best && node.Given)
+            if (onSegment)
             {
-                m_Job.Warnings.Add($"node {node.Id}: given entity {node.Entity.Index}:{node.Entity.Version} was replaced by {best.Index}:{best.Version}");
+                // The node lies inside a merged segment; later edges split that segment there.
+                node.Entity = Entity.Null;
+                node.Absorbed = true;
+                return;
             }
-            if (node.Entity == Entity.Null && !m_NodeSnapshot.Contains(best))
-            {
-                m_Record.Nodes.Add(best);
-                node.CreatedHere = true;
-            }
-            node.Entity = best;
+            m_Job.Warnings.Add($"node {node.Id}: no node entity or imported segment at its position after building an edge; " +
+                "later edges will start a new node there");
         }
 
         private static Bezier4x2 CourseXZ(ImportEdge edge, float2 a, float2 b)
@@ -1031,26 +1216,72 @@ namespace CS2MCP
             m_PreviousTool = null;
         }
 
+        /// <summary>Per-edge outcome of the last finished import, for GET /import/report.</summary>
+        public sealed class EdgeResult
+        {
+            public string id;
+            public string status;
+            public string error;
+            public string prefab;
+            public List<object> segments;
+            public object nodeA;
+            public object nodeB;
+        }
+
+        private List<EdgeResult> m_LastResults = new List<EdgeResult>();
+        private string m_LastImportId;
+
+        /// <summary>A page of the last import's per-edge results, filtered by status and/or prefab name.</summary>
+        public object QueryResults(string status, string prefab, int offset, int limit)
+        {
+            var matches = new List<EdgeResult>();
+            foreach (EdgeResult result in m_LastResults)
+            {
+                if (!string.IsNullOrEmpty(status) && !string.Equals(result.status, status, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(prefab) && (result.prefab == null
+                    || result.prefab.IndexOf(prefab, StringComparison.OrdinalIgnoreCase) < 0))
+                {
+                    continue;
+                }
+                matches.Add(result);
+            }
+            offset = math.clamp(offset, 0, matches.Count);
+            int count = math.min(limit, matches.Count - offset);
+            return new
+            {
+                importId = m_LastImportId,
+                totalMatches = matches.Count,
+                offset,
+                returned = count,
+                results = matches.GetRange(offset, count),
+            };
+        }
+
+        private const int kReportListCap = 200;
+
         private object BuildImportReport(string abortReason)
         {
-            var results = new List<object>();
-            int created = 0;
-            int failed = 0;
-            int notRun = 0;
+            var results = new List<EdgeResult>(m_Job.Edges.Count);
+            var counts = new Dictionary<string, int> { ["created"] = 0, ["merged"] = 0, ["failed"] = 0, ["pending"] = 0 };
+            var byPrefab = new Dictionary<string, Dictionary<string, int>>();
+            var failedEdges = new List<object>();
             foreach (ImportEdge edge in m_Job.Edges)
             {
-                if (edge.Status == "created")
+                counts[edge.Status] = counts.TryGetValue(edge.Status, out int n) ? n + 1 : 1;
+                if (!byPrefab.TryGetValue(edge.PrefabName, out Dictionary<string, int> perPrefab))
                 {
-                    created++;
+                    perPrefab = new Dictionary<string, int>();
+                    byPrefab[edge.PrefabName] = perPrefab;
                 }
-                else if (edge.Status == "failed")
+                perPrefab[edge.Status] = perPrefab.TryGetValue(edge.Status, out int m) ? m + 1 : 1;
+                if (edge.Status == "failed" && failedEdges.Count < kReportListCap)
                 {
-                    failed++;
+                    failedEdges.Add(new { id = edge.Id, prefab = edge.PrefabName, error = edge.Error });
                 }
-                else
-                {
-                    notRun++;
-                }
+
                 ImportNode a = m_Job.Nodes[edge.A];
                 ImportNode b = m_Job.Nodes[edge.B];
                 var segments = new List<object>();
@@ -1058,41 +1289,73 @@ namespace CS2MCP
                 {
                     segments.Add(new { index = segment.Index, version = segment.Version });
                 }
-                results.Add(new
+                results.Add(new EdgeResult
                 {
                     id = edge.Id,
                     status = edge.Status,
                     error = edge.Error,
                     prefab = edge.PrefabName,
-                    segments,
+                    segments = segments,
                     nodeA = a.Entity != Entity.Null ? new { index = a.Entity.Index, version = a.Entity.Version } : null,
                     nodeB = b.Entity != Entity.Null ? new { index = b.Entity.Index, version = b.Entity.Version } : null,
                 });
             }
+            m_LastResults = results;
+            m_LastImportId = m_Job.Id;
 
-            var nodeResults = new List<object>();
+            var unresolved = new List<object>();
+            int unresolvedCount = 0;
             int nodesResolved = 0;
+            int absorbed = 0;
             foreach (ImportNode node in m_Job.Nodes)
             {
+                if (node.CreatePrefab == Entity.Null)
+                {
+                    continue; // not used by any edge
+                }
                 if (node.Entity != Entity.Null)
                 {
                     nodesResolved++;
                 }
-                if (node.Error != null || node.Entity == Entity.Null)
+                else if (node.Absorbed)
                 {
-                    nodeResults.Add(new { id = node.Id, error = node.Error ?? "no node entity (no created edge reaches it)" });
+                    absorbed++;
+                }
+                else
+                {
+                    unresolvedCount++;
+                    if (unresolved.Count < kReportListCap)
+                    {
+                        unresolved.Add(new { id = node.Id, error = node.Error ?? "no node entity (no built edge reaches it)" });
+                    }
                 }
             }
 
+            var refused = new List<string>(m_NodePrefabsRefused.Values);
             return new
             {
                 importId = m_Job.Id,
                 name = m_Job.Name,
                 completed = abortReason == null,
                 abortReason,
-                edges = new { requested = m_Job.Edges.Count, created, failed, notRun },
-                nodes = new { requested = m_Job.Nodes.Count, resolved = nodesResolved },
-                nodesFirst = new { used = !m_NodesFirstDisabled, fallbackReason = m_NodesFirstDisabledReason },
+                edges = new
+                {
+                    requested = m_Job.Edges.Count,
+                    created = counts["created"],
+                    merged = counts["merged"],
+                    failed = counts["failed"],
+                    notRun = counts["pending"],
+                },
+                byPrefab,
+                nodes = new
+                {
+                    used = nodesResolved + absorbed + unresolvedCount,
+                    resolved = nodesResolved,
+                    absorbedIntoMergedSegments = absorbed,
+                    unresolved = unresolvedCount,
+                    standaloneCreated = m_NodeSuccesses,
+                },
+                nodesFirst = new { enabled = m_Job.NodesFirst, refusedPrefabs = refused },
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 frames = m_Frames,
                 seconds = Math.Round((DateTime.UtcNow - m_Started).TotalSeconds, 1),
@@ -1102,9 +1365,13 @@ namespace CS2MCP
                     nodesRecorded = m_Record != null ? m_Record.Nodes.Count : 0,
                     note = "POST /import/undo removes what this import created (in memory only; lost when the game restarts)",
                 },
-                warnings = m_Job.Warnings,
-                unresolvedNodes = nodeResults,
-                results,
+                warningCount = m_Job.Warnings.Count,
+                warnings = m_Job.Warnings.Count > kReportListCap ? m_Job.Warnings.GetRange(0, kReportListCap) : m_Job.Warnings,
+                failedEdges,
+                unresolvedNodes = unresolved,
+                note = "'merged' edges exist: the game joined collinear courses into one longer segment (listed per edge). " +
+                    "Lists are capped at 200; page through every per-edge result with GET /import/report?status=&prefab=&offset=&limit=.",
+                results = m_Job.FullReport ? results : null,
             };
         }
     }

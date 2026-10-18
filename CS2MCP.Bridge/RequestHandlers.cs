@@ -188,6 +188,8 @@ namespace CS2MCP
                     return ImportNetwork(request);
                 case "/import/status":
                     return ImportStatus();
+                case "/import/report":
+                    return ImportReport(request);
                 case "/import/undo":
                     return UndoImport(request);
                 default:

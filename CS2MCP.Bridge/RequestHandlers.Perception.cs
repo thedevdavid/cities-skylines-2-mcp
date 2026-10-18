@@ -132,7 +132,9 @@ namespace CS2MCP
                 : 64;
 
             TerrainSystem terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
-            TerrainHeightData heightData = terrain.GetHeightData();
+            // Wait for a pending GPU readback so the CPU heights are current (in the
+            // editor the heightmap can change between requests, e.g. after an import).
+            TerrainHeightData heightData = terrain.GetHeightData(waitForPending: true);
             WaterSystem water = World.GetOrCreateSystemManaged<WaterSystem>();
             WaterSurfaceData<SurfaceWater> surfaceData = water.GetSurfaceData(out JobHandle waterDeps);
             waterDeps.Complete();
@@ -153,9 +155,31 @@ namespace CS2MCP
                 }
             }
 
+            float minHeight = float.MaxValue;
+            float maxHeight = float.MinValue;
+            foreach (float h in heights)
+            {
+                minHeight = math.min(minHeight, h);
+                maxHeight = math.max(maxHeight, h);
+            }
+
             return BridgeResponse.Json(new
             {
                 resolution,
+                minHeight,
+                maxHeight,
+                diagnostics = new
+                {
+                    heightDataCreated = heightData.isCreated,
+                    heightDataResolution = new { x = heightData.resolution.x, z = heightData.resolution.z },
+                    hasBackdrop = heightData.hasBackdrop,
+                    heightScale = terrain.heightScaleOffset.x,
+                    heightOffset = terrain.heightScaleOffset.y,
+                    playableArea = new { x = terrain.playableArea.x, z = terrain.playableArea.y },
+                    note = minHeight == maxHeight
+                        ? "every sample has the same height: the CPU height copy is flat or not loaded (heightDataResolution 2x2 means it is missing)"
+                        : null,
+                },
                 worldMin = -kWorldHalfSize,
                 worldMax = kWorldHalfSize,
                 cellSize = step,
