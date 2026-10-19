@@ -161,11 +161,18 @@ namespace CS2MCP
         }
 
         /// <summary>Must be called on the simulation thread.</summary>
-        public bool TryQueueDemolish(Entity target, string label, BridgeRequest request)
+        public bool TryQueueDemolish(Entity target, string label, BridgeRequest request, bool ignoreErrors = false)
         {
             if (m_Stage != Stage.Idle)
             {
                 return false;
+            }
+            if (ignoreErrors && !m_RestoreIgnoreErrors)
+            {
+                // force=true: the game's ignore-errors switch for this one operation.
+                m_IgnoreErrorsBefore = m_ToolSystem.ignoreErrors;
+                m_RestoreIgnoreErrors = true;
+                m_ToolSystem.ignoreErrors = true;
             }
             m_PendingKind = OperationKind.Demolish;
             m_PendingTarget = target;
@@ -334,8 +341,16 @@ namespace CS2MCP
             m_PendingRequest = null;
         }
 
+        private bool m_RestoreIgnoreErrors;
+        private bool m_IgnoreErrorsBefore;
+
         private void Deactivate()
         {
+            if (m_RestoreIgnoreErrors)
+            {
+                m_ToolSystem.ignoreErrors = m_IgnoreErrorsBefore;
+                m_RestoreIgnoreErrors = false;
+            }
             m_Stage = Stage.Idle;
             m_PendingRequest = null;
             m_PendingPrefab = null;

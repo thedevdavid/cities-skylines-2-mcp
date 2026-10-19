@@ -566,7 +566,7 @@ namespace CS2MCP
             // Deletion MUST go through the game's bulldoze pipeline. Adding a raw
             // Deleted component skips node/block/lane cleanup and corrupts state.
             BridgeToolSystem tool = World.GetOrCreateSystemManaged<BridgeToolSystem>();
-            if (!tool.TryQueueDemolish(entity, prefabName, request))
+            if (!tool.TryQueueDemolish(entity, prefabName, request, ignoreErrors: IsForced(request)))
             {
                 return BridgeResponse.Error(409, "another build operation is in progress, retry shortly");
             }
