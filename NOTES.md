@@ -285,3 +285,44 @@ They are not readable offline: the climate prefabs are inside compressed asset b
 - **Optional:** all ✔ (train 4, air, electricity, oil, ore, forest, fertile).
 - **Publishing:** description ✘; preview and thumbnail ✔.
 - `playable` is false only because of the map name.
+
+## Round 18 (0.9.18): EditorHierarchyUISystem ArgumentOutOfRangeException on A-v4
+
+**Symptom:** `[CRITICAL] System update error during UIUpdate->EditorHierarchyUISystem: ArgumentOutOfRangeException` in `PrefabSystem.GetPrefab<T>(PrefabData)` ← `EditorHierarchyUISystem.UpdateFilteredHierarchy`.
+- **When:** first at 14:58:06 local (`SceneFlow.log`). That is the start of `import-trees-01` (`obj-20261019-215806-9`; the import ids are UTC, the logs are UTC−7). It has repeated every frame since: 18 000+ times, still at 15:09, long after the run ended at about 15:04.
+
+**Mechanism** (decompiled):
+- **Cache:** every time objects change, the Workspace panel's `UpdateHierarchy` collects the `PrefabData` of **every top-level object** (`Object + PrefabRef`, no `Owner`) into `m_PrefabsCache`, in a job.
+- **Lookup:** `UpdateFilteredHierarchy` then names each entry with the unchecked `PrefabSystem.GetPrefab(PrefabData)`, which is `m_Prefabs[m_Index]`. The game's other paths use `TryGetPrefab`, which tolerates negative indices.
+- **Bad index:** a prefab removed at runtime (`PrefabSystem.RemovePrefab`) gets `m_Index = -1000000000`.
+- **Stuck state:** the exception aborts `OnUpdate` before the cache is rebuilt, so the panel is stuck and rethrows every frame.
+
+**Cause:** some top-level object references a prefab that is no longer in the `PrefabSystem`. Possible sources of a runtime removal:
+- the game's asset-pack loader (a pack not in the active playset, unloaded or replaced);
+- `MenuUISystem` on an asset-deleted event;
+- Water Features removing its own water-source tool prefabs (placed objects do not reference these).
+
+The logs show no pack activity during the run, so the source is unproven.
+
+**Ruled out:**
+- a missing component on our placements, since the editor's own placement adds nothing extra here;
+- object count alone, since the stuck state persists after the import;
+- water sources, surfaces and outside connections, which are not hierarchy objects or carry no `PrefabRef`.
+
+**Save risk:**
+- **Panel:** UI only.
+- **Save path:** serialisation tolerates negative prefab indices.
+- **The affected objects:** they point to a prefab entity that is deleted, and are likely dropped, or shown as missing, on reload.
+- **Recommendation:** clean them before the final save.
+
+**0.9.18:** `GET /diagnostics/hierarchy` groups top-level objects by prefab and lists every group whose prefab index is invalid, with the object count and sample entities and positions. `POST /diagnostics/hierarchy?removeInvalid=true` deletes those objects (raw `Deleted`, since the bulldoze pipeline needs the missing prefab data) and resets the panel's caches by reflection. `POST` without `removeInvalid` only resets the caches.
+
+**Workaround on 0.9.17:** none from the UI. Closing or collapsing the Workspace panel does not stop `OnUpdate`. The map is otherwise fine, but every frame logs a stack trace (FPS cost) and the Workspace tree no longer updates.
+
+**Plan:**
+1. Save A-v4 under a backup name.
+2. Restart on 0.9.18 with every asset pack used by the import enabled in the editor playset.
+3. Load the map and run `GET /diagnostics/hierarchy`.
+4. If there are invalid groups, `POST ?removeInvalid=true`, then save.
+
+Do not change the playset while the editor is open.
