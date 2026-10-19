@@ -1,6 +1,6 @@
 # Editor import: notes and manual verification
 
-Branch `editor-import` (local, not pushed). Bridge version `0.9.9-editor-import` (shown by `cs2_ping`). Built with 0 warnings and deployed to `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2MCP\CS2MCP.dll`. MCP server rebuilt (`mcp-server/dist/index.js`). **Nothing here has run inside the game yet.**
+Branch `editor-import` (local, not pushed). Bridge version `0.9.10-editor-import` (shown by `cs2_ping`). Built with 0 warnings and deployed to `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2MCP\CS2MCP.dll`. MCP server rebuilt (`mcp-server/dist/index.js`). **Nothing here has run inside the game yet.**
 
 ## What changed
 
@@ -135,3 +135,15 @@ Add to the next verification run:
 
 6. Ship paths: import one `Medium Seaway` edge over water that ends on the border. Check whether the border node gets `Ship Outside Connection - Twoway` automatically, as roads do: find the node with `cs2_road_graph` (allNets) and inspect it in Scene Explorer for `Game.Net.OutsideConnection` and the marker sub-object. If not, place `Ship Outside Connection - Twoway` with `/import/objects` (`kind: outsideConnection, net: ship`; snapped to the border) and see whether the game accepts it.
 7. Custom asset packs (grass props, rocks, decals from PDX Mods): run `cs2_find_prefabs` with category `object` and a pack-specific query. The names must appear. Then dry-run `/import/objects` with a few of those names (they must resolve), place one decal and one rock for real, and undo.
+
+## Round 10 (0.9.10): audit fixes (audit/cs2-side.md)
+
+- **Finding 1, tree age:** the requested `age` is now applied in the editor. The ported definition job has `m_FixedAge`, and the object importer sets it, so editor mode uses `ToolUtils.GetRandomAge(mask)`: one bit gives one age, never dead. Before this, the vanilla editor path picked `random.NextFloat(1)` and about 5 % of trees came out dead. In-game single placements are unchanged.
+- **Finding 12:** `kind: "prop"` (and `"decal"`) count as `object`; no more mismatch warnings.
+- **Finding 4:** edge field `wall: left|right|both|none` adds `Upgraded` with `Side.Raised` to the edge definition, forcing quay walls at any height.
+
+Add to the next verification run:
+
+8. Quay wall, one edge. Import one `QuaySmall01` edge on flat dry ground at elevation 0 with `wall: "left"`, and a second with `wall: "both"`. Check that the first shows a wall on the left side (seen from a to b) and the second on both sides. Inspect the edge in Scene Explorer: `Upgraded.m_Flags.m_Left` should contain `Raised`. If no wall shows, the asset has no raised-side composition at that elevation; note it, and fall back to node elevation ≥ 4 m (one side) or ≥ 8 m (both).
+9. Seaway border node at (4718.4, −7168): after importing the seaways, find that node (`cs2_road_graph` with allNets near it, or `cs2_graph_export` with prefab Seaway) and inspect it in Scene Explorer. Check for `Game.Net.OutsideConnection` and a `Ship Outside Connection - Twoway` sub-object. If there is a tag but no marker, place the marker with `/import/objects` (`kind: outsideConnection`, `net: ship`) at that point.
+10. Does a seaway dig? Read `cs2_terrain` (resolution 256) along one test `Medium Seaway` edge, import that one edge with its nodes at riverbed y (`heightMode: absolute`), and read `cs2_terrain` again. If the bed dropped by the hull depth, the converter should write seaway y at the water surface (sea level or the CS1 water level), or omit y so the bridge uses the terrain.
