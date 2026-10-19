@@ -211,6 +211,12 @@ namespace CS2MCP
                     return MapSettings(request);
                 case "/graph/export":
                     return ExportGraph(request);
+                case "/import/tmpe":
+                    return ImportTmpe(request);
+                case "/import/tmpe/undo":
+                    return UndoTmpe(request);
+                case "/import/tmpe/status":
+                    return TmpeStatus();
                 case "/import/undo":
                     return UndoImport(request);
                 default:

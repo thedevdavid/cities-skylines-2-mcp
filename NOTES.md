@@ -147,3 +147,16 @@ Add to the next verification run:
 8. Quay wall, one edge. Import one `QuaySmall01` edge on flat dry ground at elevation 0 with `wall: "left"`, and a second with `wall: "both"`. Check that the first shows a wall on the left side (seen from a to b) and the second on both sides. Inspect the edge in Scene Explorer: `Upgraded.m_Flags.m_Left` should contain `Raised`. If no wall shows, the asset has no raised-side composition at that elevation; note it, and fall back to node elevation ≥ 4 m (one side) or ≥ 8 m (both).
 9. Seaway border node at (4718.4, −7168): after importing the seaways, find that node (`cs2_road_graph` with allNets near it, or `cs2_graph_export` with prefab Seaway) and inspect it in Scene Explorer. Check for `Game.Net.OutsideConnection` and a `Ship Outside Connection - Twoway` sub-object. If there is a tag but no marker, place the marker with `/import/objects` (`kind: outsideConnection`, `net: ship`) at that point.
 10. Does a seaway dig? Read `cs2_terrain` (resolution 256) along one test `Medium Seaway` edge, import that one edge with its nodes at riverbed y (`heightMode: absolute`), and read `cs2_terrain` again. If the bed dropped by the hull depth, the converter should write seaway y at the water surface (sea level or the CS1 water level), or omit y so the bridge uses the terrain.
+
+## Round 11 (0.9.11): TM:PE lane connections → Traffic
+
+New, not yet run in the game: `POST /import/tmpe` (+ undo, status), MCP `cs2_import_tmpe` / `cs2_undo_tmpe`, `scripts/import-tmpe.mjs`. Details in IMPORT_SCHEMA.md. Compile-time reference to Traffic.dll 0.2.13+ce1551f (PDX 80095 build 29), used only by `TrafficLaneImport`; the writes run in `BridgeTmpeImportSystem` at ToolUpdate (Updated tags added from BridgeSystem's UIUpdate would be cleared by CleanUpSystem before Traffic's lane system runs).
+
+Offline (`--write-only`): 27 nodes, 68 connections, 39 arrow lanes (37 superseded by connections, as in TM:PE), 0 direction inconsistencies, all lane ends resolved through `import-all.json` geometry.
+
+Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported network):
+1. `cs2_ping` shows `0.9.11-editor-import`.
+2. `node scripts/import-tmpe.mjs --dry-run`. Expect 27 nodes matched; read `out/tmpe-import-report.md` for skipped connections (lane-count mismatches) and `offsetDelta`/`rankAgrees` per lane.
+3. `node scripts/import-tmpe.mjs`. Open Traffic's Lane Connector on 2–3 listed junctions (e.g. CS1 node 11611 near -6461,1078; 9988 near -6198,627): the custom connections should show, and lanes without custom connections keep defaults.
+4. Save the map, return to the menu, reload, check the same junctions again (Traffic's loader validates the data and would reset invalid nodes; `Traffic.log` says so).
+5. Undo test (optional, before saving): `--undo`, junctions back to defaults.

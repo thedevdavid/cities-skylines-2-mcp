@@ -22,6 +22,8 @@
     <GamePath Condition="'$(GamePath)' == '' And Exists('E:\SteamLibrary\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Game.dll')">E:\SteamLibrary\steamapps\common\Cities Skylines II</GamePath>
     <ManagedDLLPath>$(GamePath)\Cities2_Data\Managed</ManagedDLLPath>
     <!-- 本地 mod 部署目录（游戏会从这里加载） -->
+    <!-- Traffic (PDX 80095) for the TM:PE importer. Pinned: 0.2.13+ce1551f (pdx_mods/80095_29). Only TrafficLaneImport uses it; the bridge loads without Traffic. -->
+    <TrafficDllPath Condition="'$(TrafficDllPath)' == ''">$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II\.cache\Mods\pdx_mods\80095_29\Traffic.dll</TrafficDllPath>
     <ModDeployPath>$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II\Mods\CS2MCP</ModDeployPath>
   </PropertyGroup>
 
@@ -88,6 +90,10 @@
     </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">
       <HintPath>$(ManagedDLLPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Traffic">
+      <HintPath>$(TrafficDllPath)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">

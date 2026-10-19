@@ -255,3 +255,25 @@ POST body, all fields optional:
 Response (GET and POST): `{mode, applied:[names], problems:[...], settings:{...}, notWritable:[...], note}`.
 - `settings` holds: `mapName, theme, climate, latitude, longitude, seaLevel, waterSystem, heightScale, heightOffset, leftHandTraffic, naturalDisasters, unlockAll, unlimitedMoney, unlockMapTiles, time:{startingYear,startingMonth,startingTime}, mapPanel:{...}, camera:{pivot,angle,zoom}, startingTiles`.
 - Name, description, preview, thumbnail and starting tiles are set by hand in the editor.
+
+## TM:PE lane connections → Traffic (`/import/tmpe`)
+
+Recreates the CS1 map's TM:PE lane connections and lane arrows as lane connections of the **Traffic** mod (PDX 80095, krzychu124). Requires Traffic in the playset. The bridge is compiled against **Traffic 0.2.13+ce1551f** (`pdx_mods/80095_29/Traffic.dll`, csproj `TrafficDllPath`); another Traffic build is refused (409) unless `traffic.forceVersion` is set, because the importer writes Traffic's component structs directly. Without Traffic the bridge still loads; only these endpoints answer 409.
+
+| Endpoint | |
+|---|---|
+| `POST /import/tmpe` | Body from `scripts/import-tmpe.mjs` (`cs2mcp/tmpe-import/v1`). Runs at the next ToolUpdate and returns the report. |
+| `POST /import/tmpe/undo` | Removes the Traffic data from every node the importer wrote in this game session (memory only). |
+| `GET /import/tmpe/status` | The last report. |
+
+MCP: `cs2_import_tmpe` (`file`, `dryRun`, `replace`), `cs2_undo_tmpe`. CLI: `node scripts/import-tmpe.mjs [--dry-run|--undo|--status|--write-only|--replace]`; it builds the body from `cs1-offline/out/tmpe-offline.json`, the newest CS1 dump (net prefab lanes, segment directions) and `net-converter/out/import-all.json` (CS2 position of node `n<id>`, course of `e<segment>_k`), and writes `out/tmpe-import-report.{json,md}`.
+
+**Mapping (all by position; entity ids from an import report do not survive a reload):**
+- node: the nearest CS2 net node (3D) to the imported node position, within `nodeRadius` (12 m);
+- edge: of the edges starting or ending at that node, the one whose centre line, `probeDist` (20 m) from the node, is nearest the CS1 segment's probe point, within `edgeTolerance` (8 m);
+- lane: the CS2 car lane flowing into the node (source) or out of it (target) whose lateral offset from its direction group's centre is nearest the CS1 lane's. CS1 and CS2 must have the same number of car lanes in that direction, otherwise the connection is **skipped** (`lane-count mismatch`). If any connection of a CS1 source lane is skipped, the others of that lane are skipped too (a partial list would remove a connection TM:PE kept).
+- arrows: TM:PE ignores arrows on lanes with lane connections (`superseded`). Otherwise the lane keeps only those of CS2's current connections whose target edge matches a CS1 segment in an arrow direction (TM:PE's rule: Left/Right when |cross(from, to)| ≥ 0.5 with both directions pointing away from the node). `unchanged` if CS2's defaults already follow the arrows.
+
+**What is written** (as Traffic's `TLEDataMigrationSystem`): on the node `ModifiedConnections` and a `ModifiedLaneConnections` buffer (one entry per source lane: edge, composition lane index, lane position, carriageway/group); per source lane an entity with `DataOwner(node)`, `PrefabRef(Traffic.FakePrefab)` and a `GeneratedConnection` buffer (`method` Road; lane positions and carriageway/group from Traffic's `NetUtils.GetAdditionalLaneDetails`). Then `Updated` on the node, its edges and their other nodes, so Traffic's lane system rebuilds the node lanes in the same frame. Nodes that already have Traffic data are skipped unless `options.replace`, which rebuilds that node's Traffic data from the import only.
+
+Statuses: connections `created` / `mapped` (dry run) / `skipped`; arrows also `superseded`, `unchanged`. Save the map to keep the result; Traffic resets custom connections when a road's composition changes (or Road Builder touches it).

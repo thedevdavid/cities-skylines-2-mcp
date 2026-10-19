@@ -1894,6 +1894,52 @@ server.registerTool(
 );
 
 server.registerTool(
+  "cs2_import_tmpe",
+  {
+    title: "Import TM:PE lane connections into Traffic",
+    description:
+      "Recreate CS1 TM:PE lane connections and lane arrows as Traffic mod (PDX 80095, pinned 0.2.13) lane connections " +
+      "on the live network. Pass 'file': the request written by cs2mcp/scripts/import-tmpe.mjs --write-only " +
+      "(cs2mcp/out/tmpe-import-request.json). Matches nodes, edges and lanes by position and skips (and reports) " +
+      "lane-count mismatches. Run with dryRun first. Undo with cs2_undo_tmpe (this game session only).",
+    inputSchema: {
+      file: z.string().describe("Path to the import request JSON (scripts/import-tmpe.mjs --write-only)"),
+      dryRun: z.boolean().optional().describe("Map everything and report, write nothing"),
+      replace: z.boolean().optional().describe("Overwrite Traffic data already on a matched node"),
+    },
+  },
+  async ({ file, dryRun, replace }) => {
+    try {
+      const body = JSON.parse(await readFile(file, "utf8")) as { options?: Record<string, unknown> };
+      body.options = { ...body.options };
+      if (dryRun !== undefined) body.options.dryRun = dryRun;
+      if (replace !== undefined) body.options.replace = replace;
+      const { ok, payload } = await bridgePost("/import/tmpe", body, 300_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_undo_tmpe",
+  {
+    title: "Undo the last TM:PE import",
+    description: "Remove the Traffic lane connections that cs2_import_tmpe wrote in this game session.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ok, payload } = await bridgePost("/import/tmpe/undo", undefined, 60_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "cs2_graph_export",
   {
     title: "Export the whole network graph to a file",
