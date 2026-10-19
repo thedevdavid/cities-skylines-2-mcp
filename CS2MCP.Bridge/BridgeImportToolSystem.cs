@@ -103,6 +103,7 @@ namespace CS2MCP
         private enum Stage
         {
             Idle,
+            Warmup,
             Define,
             Settle,
             Apply,
@@ -210,7 +211,13 @@ namespace CS2MCP
         {
             if (m_Stage == Stage.Idle)
             {
-                return new { running = false, undoableImports = m_Records.Count, last = m_LastReport };
+                return new
+                {
+                    running = false,
+                    undoableImports = m_Records.Count,
+                    validation = AnarchyInterop.Describe(m_ToolSystem),
+                    last = m_LastReport,
+                };
             }
             if (m_Job == null)
             {
@@ -359,10 +366,28 @@ namespace CS2MCP
             }
         }
 
+        // Tool frames between activating this tool and the first definitions: on a
+        // tool change Anarchy's EnableToolErrorsSystem restores every tool error for
+        // a frame before its DisableToolErrorsSystem suppresses them again.
+        private const int kWarmupFrames = 3;
+        private int m_WarmupLeft;
+        private bool m_IgnoreErrorsAtStart;
+        private bool m_AnarchyDetected;
+        private bool? m_AnarchyEnabledAtStart;
+        private bool m_AnarchyRegistered;
+
         private void Activate()
         {
             m_Current = null;
-            m_Stage = Stage.Define;
+            m_IgnoreErrorsAtStart = m_ToolSystem.ignoreErrors;
+            m_AnarchyDetected = AnarchyInterop.Detected;
+            m_AnarchyEnabledAtStart = AnarchyInterop.ToggleState();
+            if (!m_AnarchyRegistered && m_AnarchyDetected)
+            {
+                m_AnarchyRegistered = AnarchyInterop.RegisterTool(this);
+            }
+            m_WarmupLeft = kWarmupFrames;
+            m_Stage = Stage.Warmup;
             m_PreviousTool = m_ToolSystem.activeTool;
             m_ToolSystem.activeTool = this;
         }
@@ -378,6 +403,14 @@ namespace CS2MCP
             {
                 switch (m_Stage)
                 {
+                    case Stage.Warmup:
+                        applyMode = ApplyMode.None;
+                        if (--m_WarmupLeft <= 0)
+                        {
+                            m_Stage = Stage.Define;
+                        }
+                        break;
+
                     case Stage.Define:
                         StageDefine();
                         break;
@@ -1563,6 +1596,16 @@ namespace CS2MCP
                 nodesFirst = new { enabled = m_Job.NodesFirst, refusedPrefabs = refused },
                 snapToSegment = new { requested = snapRequested, snapped, fellBack = snapFellBack, details = snaps },
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
+                validation = new
+                {
+                    ignoreErrors = m_IgnoreErrorsAtStart,
+                    anarchyDetected = m_AnarchyDetected,
+                    anarchyEnabled = m_AnarchyEnabledAtStart,
+                    anarchyEnabledAtEnd = AnarchyInterop.ToggleState(),
+                    note = m_AnarchyDetected && m_AnarchyEnabledAtStart != true
+                        ? "Anarchy is loaded but its toggle was off: the game's validation applied in full"
+                        : null,
+                },
                 frames = m_Frames,
                 seconds = Math.Round((DateTime.UtcNow - m_Started).TotalSeconds, 1),
                 undo = new
