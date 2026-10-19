@@ -8,7 +8,8 @@
 //   node scripts/import-network.mjs --report [failed|merged|created] [--prefab P] [--offset N --limit N]
 //
 // Options: --at X,Z (translate all x/z, including control points), --batch N,
-// --no-nodes-first, --settle N, --full (ask the bridge for every per-edge result).
+// --no-nodes-first, --settle N, --full (ask the bridge for every per-edge result),
+// --bypass (options.bypassValidation: ignore the game's validation during the import).
 // Bridge URL: CS2_BRIDGE_URL (default http://127.0.0.1:8642). Node 18+.
 import { readFile } from "node:fs/promises";
 
@@ -35,6 +36,7 @@ function parseArgs(argv) {
     else if (a === "--no-nodes-first") args.nodesFirst = false;
     else if (a === "--settle") args.settle = Number(argv[++i]);
     else if (a === "--full") args.full = true;
+    else if (a === "--bypass") args.bypass = true;
     else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
     else args.file = a;
   }
@@ -100,6 +102,7 @@ async function main() {
     if (args.nodesFirst === false) doc.options.nodesFirst = false;
     if (args.settle) doc.options.settleFrames = args.settle;
     if (args.full) doc.options.report = "full";
+    if (args.bypass) doc.options.bypassValidation = true;
     console.error(`posting ${doc.nodes.length} nodes / ${doc.edges.length} edges to ${BRIDGE}/import/network ...`);
     out = await call("POST", "/import/network", doc);
   }

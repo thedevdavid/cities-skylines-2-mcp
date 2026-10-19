@@ -70,6 +70,7 @@ End-to-end length must be 4–1500 m. The game may split an edge into several se
 | `heightMode` | `"elevation"` | `"absolute"` derives missing `elevation` from `y`. |
 | `settleFrames` | 1 | Tool frames with `applyMode = None` between creating definitions and applying (1–30). Raise it if large batches are rejected for no stated reason. |
 | `dryRun` | false | Validate ids, references, prefab names and lengths; build nothing. |
+| `bypassValidation` | false | Sets `ToolSystem.ignoreErrors` (the game's own ignore-errors switch, which `GetAllowApply` honours) for the duration of the import and restores the previous value afterwards, also when the import is interrupted. Imports then no longer depend on Anarchy's toggle or the open tool. The report's `validation` block records it. |
 | `report` | `"summary"` | `"full"` adds every per-edge result to the response. Large imports should keep the summary and page with `GET /import/report`. |
 
 ## How it builds

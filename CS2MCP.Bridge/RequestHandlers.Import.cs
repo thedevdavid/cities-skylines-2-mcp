@@ -66,6 +66,7 @@ namespace CS2MCP
             public int? settleFrames;
             public bool? dryRun;
             public string report;
+            public bool? bypassValidation;
         }
 
         public sealed class ImportRequestDto
@@ -168,6 +169,7 @@ namespace CS2MCP
                 NodesFirst = options.nodesFirst ?? true,
                 SettleFrames = math.clamp(options.settleFrames ?? 1, 1, 30),
                 FullReport = string.Equals(options.report, "full", StringComparison.OrdinalIgnoreCase),
+                BypassValidation = options.bypassValidation == true,
             };
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();

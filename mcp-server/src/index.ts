@@ -1711,6 +1711,10 @@ server.registerTool(
           heightMode: z.enum(["elevation", "absolute"]).optional(),
           settleFrames: z.number().int().min(1).max(30).optional(),
           dryRun: z.boolean().optional(),
+          bypassValidation: z
+            .boolean()
+            .optional()
+            .describe("Turn on ToolSystem.ignoreErrors during the import (restored after): builds even where the game's checks object, independent of Anarchy's UI state"),
           report: z
             .enum(["summary", "full"])
             .optional()

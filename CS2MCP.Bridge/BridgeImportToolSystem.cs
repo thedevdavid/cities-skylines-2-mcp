@@ -87,6 +87,8 @@ namespace CS2MCP
             public bool NodesFirst;
             public int SettleFrames;
             public bool FullReport;
+            /// <summary>Set ToolSystem.ignoreErrors for the duration of the import (restored afterwards).</summary>
+            public bool BypassValidation;
             public List<string> Warnings = new List<string>();
         }
 
@@ -375,6 +377,8 @@ namespace CS2MCP
         private bool m_AnarchyDetected;
         private bool? m_AnarchyEnabledAtStart;
         private bool m_AnarchyRegistered;
+        private bool m_RestoreIgnoreErrors;
+        private bool m_IgnoreErrorsBefore;
 
         private void Activate()
         {
@@ -385,6 +389,14 @@ namespace CS2MCP
             if (!m_AnarchyRegistered && m_AnarchyDetected)
             {
                 m_AnarchyRegistered = AnarchyInterop.RegisterTool(this);
+            }
+            if (m_Job != null && m_Job.BypassValidation)
+            {
+                // Same switch as the game's own "ignore errors" debug option: GetAllowApply
+                // then accepts batches whatever the validation errors.
+                m_IgnoreErrorsBefore = m_ToolSystem.ignoreErrors;
+                m_RestoreIgnoreErrors = true;
+                m_ToolSystem.ignoreErrors = true;
             }
             m_WarmupLeft = kWarmupFrames;
             m_Stage = Stage.Warmup;
@@ -1402,6 +1414,7 @@ namespace CS2MCP
             m_PendingRequest?.Complete(response);
             m_PendingRequest = null;
             m_Stage = Stage.Idle;
+            RestoreIgnoreErrors();
             m_Queue.Clear();
             m_Current = null;
             m_Job = null;
@@ -1463,6 +1476,22 @@ namespace CS2MCP
         }
 
         private const int kReportListCap = 200;
+
+        private void RestoreIgnoreErrors()
+        {
+            if (m_RestoreIgnoreErrors)
+            {
+                m_ToolSystem.ignoreErrors = m_IgnoreErrorsBefore;
+                m_RestoreIgnoreErrors = false;
+            }
+        }
+
+        [Preserve]
+        protected override void OnDestroy()
+        {
+            RestoreIgnoreErrors();
+            base.OnDestroy();
+        }
 
         private object BuildImportReport(string abortReason)
         {
@@ -1598,13 +1627,16 @@ namespace CS2MCP
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 validation = new
                 {
+                    bypassValidation = m_Job.BypassValidation,
                     ignoreErrors = m_IgnoreErrorsAtStart,
                     anarchyDetected = m_AnarchyDetected,
                     anarchyEnabled = m_AnarchyEnabledAtStart,
                     anarchyEnabledAtEnd = AnarchyInterop.ToggleState(),
-                    note = m_AnarchyDetected && m_AnarchyEnabledAtStart != true
-                        ? "Anarchy is loaded but its toggle was off: the game's validation applied in full"
-                        : null,
+                    note = m_Job.BypassValidation
+                        ? "bypassValidation: ToolSystem.ignoreErrors was on during the import and restored afterwards"
+                        : m_AnarchyDetected && m_AnarchyEnabledAtStart != true
+                            ? "Anarchy is loaded but its toggle was off: the game's validation applied in full"
+                            : null,
                 },
                 frames = m_Frames,
                 seconds = Math.Round((DateTime.UtcNow - m_Started).TotalSeconds, 1),
