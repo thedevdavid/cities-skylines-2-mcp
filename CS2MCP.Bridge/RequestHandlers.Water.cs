@@ -248,55 +248,65 @@ namespace CS2MCP
                 return BridgeResponse.Json(new { error = $"{problems.Count} problem(s); nothing was created", problems }, 400);
             }
 
+            bool dryRun = body.dryRun == true;
             var record = new WaterRecord { Id = $"wat-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{++m_WaterImportCounter}", Name = body.name };
-            var results = new List<object>();
-            EntityCommandBuffer commandBuffer = body.dryRun == true
-                ? default
-                : World.GetOrCreateSystemManaged<ToolOutputBarrier>().CreateCommandBuffer();
-            EntityArchetype archetype = EntityManager.CreateArchetype(
-                ComponentType.ReadWrite<WaterSourceData>(),
-                ComponentType.ReadWrite<Transform>(),
-                ComponentType.ReadWrite<Created>());
-            foreach ((WaterSourceDto dto, WaterSourceData data0, float3 position, List<string> notes) in planned)
+
+            BridgeResponse Answer(List<int> ids)
             {
-                WaterSourceData data = data0;
-                if (body.dryRun != true)
+                var results = new List<object>(planned.Count);
+                for (int i = 0; i < planned.Count; i++)
                 {
-                    data.m_Id = waterSystem.GetNextSourceId();
-                    Entity entity = commandBuffer.CreateEntity(archetype);
-                    commandBuffer.SetComponent(entity, data);
-                    commandBuffer.SetComponent(entity, new Transform { m_Position = position, m_Rotation = quaternion.identity });
-                    commandBuffer.AddComponent(entity, default(Updated));
-                    record.SourceIds.Add(data.m_Id);
+                    (WaterSourceDto dto, WaterSourceData data, float3 position, List<string> notes) = planned[i];
+                    results.Add(new
+                    {
+                        id = dto.id,
+                        sourceId = ids != null ? ids[i] : (int?)null,
+                        constantDepth = data.m_ConstantDepth,
+                        height = data.m_Height,
+                        radius = data.m_Radius,
+                        multiplier = data.m_Multiplier,
+                        terrainY = position.y,
+                        notes,
+                    });
                 }
-                results.Add(new
+                if (ids != null)
                 {
-                    id = dto.id,
-                    sourceId = body.dryRun == true ? (int?)null : data.m_Id,
-                    constantDepth = data.m_ConstantDepth,
-                    height = data.m_Height,
-                    radius = data.m_Radius,
-                    multiplier = data.m_Multiplier,
-                    terrainY = position.y,
-                    notes,
+                    record.SourceIds.AddRange(ids);
+                    m_WaterRecords.Add(record);
+                }
+                return BridgeResponse.Json(new
+                {
+                    importId = ids != null ? record.Id : null,
+                    dryRun,
+                    mode = editor ? "editor" : "game",
+                    waterSystem = legacy ? "legacy" : "new",
+                    created = ids != null ? ids.Count : 0,
+                    note = "sources are created through the tool output barrier; water needs simulation time to spread " +
+                           "(in the editor, let the water simulation run). POST /import/water/undo removes them.",
+                    sources = results,
                 });
             }
-            if (body.dryRun != true)
-            {
-                m_WaterRecords.Add(record);
-            }
 
-            return BridgeResponse.Json(new
+            if (dryRun)
             {
-                importId = body.dryRun == true ? null : record.Id,
-                dryRun = body.dryRun == true,
-                mode = editor ? "editor" : "game",
-                waterSystem = legacy ? "legacy" : "new",
-                created = body.dryRun == true ? 0 : planned.Count,
-                note = "sources are created at the end of this frame; water needs simulation time to spread " +
-                       "(in the editor, let the water simulation run). POST /import/water/undo removes them.",
-                sources = results,
-            });
+                return Answer(null);
+            }
+            if (TransitToolsBusy(out error))
+            {
+                return error;
+            }
+            var work = new BridgeImportToolSystem.WaterWork { Complete = Answer };
+            foreach ((WaterSourceDto _, WaterSourceData data, float3 position, List<string> _) in planned)
+            {
+                work.Sources.Add(data);
+                work.Positions.Add(position);
+            }
+            if (!World.GetOrCreateSystemManaged<BridgeImportToolSystem>().TryStartWater(work, request))
+            {
+                return BridgeResponse.Error(409, "a network import, undo or water operation is running; see GET /import/status");
+            }
+            // Answered by BridgeImportToolSystem once the sources are written (a few tool frames).
+            return null;
         }
 
         private BridgeResponse UndoWater(BridgeRequest request)
@@ -320,31 +330,42 @@ namespace CS2MCP
             }
 
             var wanted = new HashSet<int>(record.SourceIds);
-            int deleted = 0;
-            EntityCommandBuffer commandBuffer = World.GetOrCreateSystemManaged<ToolOutputBarrier>().CreateCommandBuffer();
+            var work = new BridgeImportToolSystem.WaterWork();
             using (NativeArray<Entity> entities = WaterSourceQuery.ToEntityArray(Allocator.Temp))
             {
                 foreach (Entity entity in entities)
                 {
                     if (wanted.Contains(EntityManager.GetComponentData<WaterSourceData>(entity).m_Id))
                     {
-                        commandBuffer.AddComponent(entity, default(Deleted));
-                        deleted++;
+                        work.Deletes.Add(entity);
                     }
                 }
             }
-            m_WaterRecords.RemoveAt(m_WaterRecords.Count - 1);
-            return BridgeResponse.Json(new
+            int deleted = work.Deletes.Count;
+            work.Complete = _ =>
             {
-                undone = true,
-                importId = record.Id,
-                sourcesDeleted = deleted,
-                sourcesRecorded = record.SourceIds.Count,
-                undoableWaterImportsLeft = m_WaterRecords.Count,
-                note = deleted < record.SourceIds.Count
-                    ? "some recorded sources no longer exist (deleted by hand, or ids changed by a water-system upgrade)"
-                    : null,
-            });
+                m_WaterRecords.Remove(record);
+                return BridgeResponse.Json(new
+                {
+                    undone = true,
+                    importId = record.Id,
+                    sourcesDeleted = deleted,
+                    sourcesRecorded = record.SourceIds.Count,
+                    undoableWaterImportsLeft = m_WaterRecords.Count,
+                    note = deleted < record.SourceIds.Count
+                        ? "some recorded sources no longer exist (deleted by hand, or ids changed by a water-system upgrade)"
+                        : null,
+                });
+            };
+            if (TransitToolsBusy(out error))
+            {
+                return error;
+            }
+            if (!World.GetOrCreateSystemManaged<BridgeImportToolSystem>().TryStartWater(work, request))
+            {
+                return BridgeResponse.Error(409, "a network import, undo or water operation is running; see GET /import/status");
+            }
+            return null;
         }
     }
 }

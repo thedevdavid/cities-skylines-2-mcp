@@ -92,6 +92,20 @@ namespace CS2MCP
             public List<string> Warnings = new List<string>();
         }
 
+        /// <summary>
+        /// Water sources to create and/or delete in one tool frame. The command
+        /// buffer of ToolOutputBarrier may only be created inside a system update,
+        /// so /import/water and its undo run here, as Water Features does from its tool.
+        /// </summary>
+        public sealed class WaterWork
+        {
+            public List<Game.Simulation.WaterSourceData> Sources = new List<Game.Simulation.WaterSourceData>();
+            public List<float3> Positions = new List<float3>();
+            public List<Entity> Deletes = new List<Entity>();
+            /// <summary>Called on the main thread with the assigned source ids; builds the HTTP answer.</summary>
+            public Func<List<int>, BridgeResponse> Complete;
+        }
+
         /// <summary>Entities created by one import, for /import/undo. Kept in memory only (not saved with the map).</summary>
         public sealed class ImportRecord
         {
@@ -164,6 +178,8 @@ namespace CS2MCP
         private object m_LastReport;
 
         private TerrainSystem m_Terrain;
+        private EntityArchetype m_WaterSourceArchetype;
+        private WaterWork m_WaterWork;
         private EntityQuery m_NodeQuery;
         private EntityQuery m_EdgeQuery;
         private EntityQuery m_IconQuery;
@@ -181,6 +197,10 @@ namespace CS2MCP
         {
             base.OnCreate();
             m_Terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
+            m_WaterSourceArchetype = EntityManager.CreateArchetype(
+                ComponentType.ReadWrite<Game.Simulation.WaterSourceData>(),
+                ComponentType.ReadWrite<Game.Objects.Transform>(),
+                ComponentType.ReadWrite<Created>());
             m_NodeQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<PrefabRef>() },
@@ -223,7 +243,12 @@ namespace CS2MCP
             }
             if (m_Job == null)
             {
-                return new { running = true, operation = "undo", importId = m_UndoTarget != null ? m_UndoTarget.Id : null };
+                return new
+                {
+                    running = true,
+                    operation = m_WaterWork != null ? "water" : "undo",
+                    importId = m_UndoTarget != null ? m_UndoTarget.Id : null,
+                };
             }
             int created = 0;
             int failed = 0;
@@ -300,6 +325,64 @@ namespace CS2MCP
             m_PendingRequest = request;
             Activate();
             return true;
+        }
+
+        /// <summary>Must be called on the simulation thread. Creates/deletes water sources on the next tool frames.</summary>
+        public bool TryStartWater(WaterWork work, BridgeRequest request)
+        {
+            if (m_Stage != Stage.Idle)
+            {
+                return false;
+            }
+            m_Job = null;
+            m_Record = null;
+            m_UndoTarget = null;
+            m_Queue.Clear();
+            m_WaterWork = work;
+            m_Frames = 0;
+            m_Started = DateTime.UtcNow;
+            m_PendingRequest = request;
+            Activate();
+            return true;
+        }
+
+        private void RunWater()
+        {
+            applyMode = ApplyMode.None;
+            EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
+            var ids = new List<int>(m_WaterWork.Sources.Count);
+            for (int i = 0; i < m_WaterWork.Sources.Count; i++)
+            {
+                Game.Simulation.WaterSourceData data = m_WaterWork.Sources[i];
+                data.m_Id = m_WaterSystem.GetNextSourceId();
+                Entity entity = commandBuffer.CreateEntity(m_WaterSourceArchetype);
+                commandBuffer.SetComponent(entity, data);
+                commandBuffer.SetComponent(entity, new Game.Objects.Transform { m_Position = m_WaterWork.Positions[i], m_Rotation = quaternion.identity });
+                commandBuffer.AddComponent(entity, default(Updated));
+                ids.Add(data.m_Id);
+            }
+            foreach (Entity entity in m_WaterWork.Deletes)
+            {
+                if (EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity))
+                {
+                    commandBuffer.AddComponent(entity, default(Deleted));
+                }
+            }
+            FinishWater(m_WaterWork.Complete(ids));
+        }
+
+        private void FinishWater(BridgeResponse response)
+        {
+            m_PendingRequest?.Complete(response);
+            m_PendingRequest = null;
+            m_WaterWork = null;
+            m_Stage = Stage.Idle;
+            RestoreIgnoreErrors();
+            if (m_ToolSystem.activeTool == this)
+            {
+                m_ToolSystem.activeTool = m_PreviousTool != null && m_PreviousTool != this ? m_PreviousTool : m_DefaultToolSystem;
+            }
+            m_PreviousTool = null;
         }
 
         /// <summary>Must be called on the simulation thread. Deletes what the last import (or the one with this id) created.</summary>
@@ -424,7 +507,14 @@ namespace CS2MCP
                         break;
 
                     case Stage.Define:
-                        StageDefine();
+                        if (m_WaterWork != null)
+                        {
+                            RunWater();
+                        }
+                        else
+                        {
+                            StageDefine();
+                        }
                         break;
 
                     case Stage.Settle:
@@ -457,7 +547,14 @@ namespace CS2MCP
             {
                 Mod.Log.Warn($"BridgeImportToolSystem error in stage {m_Stage}: {e}");
                 applyMode = ApplyMode.Clear;
-                Finish($"{e.GetType().Name}: {e.Message}");
+                if (m_WaterWork != null)
+                {
+                    FinishWater(BridgeResponse.Error(500, $"water operation failed: {e.GetType().Name}: {e.Message}"));
+                }
+                else
+                {
+                    Finish($"{e.GetType().Name}: {e.Message}");
+                }
             }
             return inputDeps;
         }
@@ -470,7 +567,14 @@ namespace CS2MCP
                 // Another tool took over mid-import: stop, keep the user's tool and
                 // report what exists (it stays recorded for /import/undo).
                 m_PreviousTool = null;
-                Finish("interrupted because another tool became active (the user picked a tool?)");
+                if (m_WaterWork != null)
+                {
+                    FinishWater(BridgeResponse.Error(409, "interrupted because another tool became active before the water sources were created; nothing was changed"));
+                }
+                else
+                {
+                    Finish("interrupted because another tool became active (the user picked a tool?)");
+                }
             }
             base.OnStopRunning();
         }
