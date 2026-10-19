@@ -36,8 +36,17 @@ namespace CS2MCP
             public ImportSnapDto b;
         }
 
+        public sealed class ImportConnectDto
+        {
+            public int? index;
+            public int? version;
+            public string voltage;
+            public float? radius;
+        }
+
         public sealed class ImportNodeDto
         {
+            public ImportConnectDto connectTo;
             public ImportSnapDto snapToSegment;
             public string id;
             public float x;
@@ -215,6 +224,17 @@ namespace CS2MCP
                         node.Given = true;
                         node.XZ = EntityManager.GetComponentData<Node>(entity).m_Position.xz;
                     }
+                }
+                if (dto.connectTo != null)
+                {
+                    if (!TryResolveConnect(dto.connectTo, node.XZ, out Entity marker, out string why))
+                    {
+                        problems.Add($"node '{dto.id}': {why}");
+                        continue;
+                    }
+                    node.Entity = marker;
+                    node.Given = true;
+                    node.XZ = EntityManager.GetComponentData<Node>(marker).m_Position.xz;
                 }
                 node.OriginalXZ = node.XZ;
                 if (dto.snapToSegment != null && !ApplySnap(node, dto.snapToSegment, $"node '{dto.id}'", problems, job))

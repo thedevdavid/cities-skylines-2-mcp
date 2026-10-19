@@ -1691,6 +1691,15 @@ server.registerTool(
             elevation: z.number().optional(),
             entity: z.object({ index: z.number().int(), version: z.number().int() }).optional(),
             snapToSegment: importSnap.optional(),
+            connectTo: z
+              .object({
+                index: z.number().int().optional(),
+                version: z.number().int().optional(),
+                voltage: z.enum(["high", "low"]).optional(),
+                radius: z.number().positive().max(500).optional(),
+              })
+              .optional()
+              .describe("Attach this node to a building's electricity marker node (power-line ends); building id, or nearest within radius"),
           }),
         )
         .optional(),
@@ -1935,6 +1944,27 @@ server.registerTool(
     try {
       const { ok, payload } = await bridgePost("/import/tmpe/undo", undefined, 60_000);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_entity_subnets",
+  {
+    title: "A building's sub-nets and power connectors",
+    description:
+      "List a building's own network pieces: internal paths and its electricity marker nodes (voltage high/low, " +
+      "position). A power line connects only by ending on such a node; use connectTo in cs2_import_network.",
+    inputSchema: {
+      index: z.number().int(),
+      version: z.number().int(),
+    },
+  },
+  async ({ index, version }) => {
+    try {
+      return jsonResult(await bridgeJson(`/entity/subnets?index=${index}&version=${version}`));
     } catch (err) {
       return errorResult(err);
     }

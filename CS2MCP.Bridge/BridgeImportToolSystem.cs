@@ -1348,6 +1348,21 @@ namespace CS2MCP
                     edge.Segments.Clear();
                     continue;
                 }
+                // Also record the short pieces of a split course that no sample point hit,
+                // so undo removes the whole course (seen live: 8 m dam pieces left behind).
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    if (prefabs[i] != edge.Prefab || edge.Segments.Contains(candidates[i]))
+                    {
+                        continue;
+                    }
+                    if (MathUtils.Distance(course, curves[i].a, out _) < tolerance
+                        && MathUtils.Distance(course, curves[i].d, out _) < tolerance
+                        && MathUtils.Distance(course, MathUtils.Position(curves[i], 0.5f), out _) < tolerance)
+                    {
+                        edge.Segments.Add(candidates[i]);
+                    }
+                }
                 edge.Status = exact ? "created" : "merged";
                 if (!exact)
                 {

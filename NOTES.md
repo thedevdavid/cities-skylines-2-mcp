@@ -155,7 +155,7 @@ New, not yet run in the game: `POST /import/tmpe` (+ undo, status), MCP `cs2_imp
 Offline (`--write-only`): 27 nodes, 68 connections, 39 arrow lanes (37 superseded by connections, as in TM:PE), 0 direction inconsistencies, all lane ends resolved through `import-all.json` geometry.
 
 Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported network):
-1. `cs2_ping` shows `0.9.12-editor-import`.
+1. `cs2_ping` shows `0.9.13-editor-import`.
 2. `node scripts/import-tmpe.mjs --dry-run`. Expect 27 nodes matched; read `out/tmpe-import-report.md` for skipped connections (lane-count mismatches) and `offsetDelta`/`rankAgrees` per lane.
 3. `node scripts/import-tmpe.mjs`. Open Traffic's Lane Connector on 2–3 listed junctions (e.g. CS1 node 11611 near -6461,1078; 9988 near -6198,627): the custom connections should show, and lanes without custom connections keep defaults.
 4. Save the map, return to the menu, reload, check the same junctions again (Traffic's loader validates the data and would reset invalid nodes; `Traffic.log` says so).
@@ -172,3 +172,31 @@ Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported
 - **Bridge:** such failures now say "dropped by the game … runs inside the existing '<prefab>' segment …".
 - **Climates:** `/prefabs?category=climate|theme`, and the settings error lists the names (after a game restart).
 - **Dry run:** top-level `dryRun` (MCP parameter and request body).
+
+## Round 13: live experiments on dakota-A-2048 (game on 0.9.11), and 0.9.13
+
+All test placements below were undone afterwards. The map is as it was before the tests.
+
+### Dam at the CS1 site (x 1550, z 4690, x1 frame)
+
+- **The CS2 dam has three parts:** the building `HydroelectricPowerPlant01` (48×72 m, placement `Shoreline | SubNetSnap | RoadSide`), the network `Hydroelectric_Power_Plant_01 Dam` (a `RoadPrefab`, 34 m wide, max slope 0, elevation range 0–0, segments 9.6–22.4 m), and the extension `HydroelectricPowerPlant01_End`. `NotreDame` is unrelated.
+- **The building alone:** `/import/objects` with `bypassValidation` accepts it off-grid, exactly at (1550, 4690), y 166.7 on the terrain. It brings no dam stub or other sub-net, and the site is dry ground (162–166 m). The water channel runs north–south about 110–170 m to the west (x ≈ 1380–1440, bed 125–150 m).
+- **Rotation:** the CS1 dam axis is west–east. The converted quays and path run from (1440, 4673) to (1576, 4694), a heading of about 81°. So **261.7° is the rotation that aligns** the plant's 72 m axis with the dam, front facing west to the river. 98.3° is about 17° off that axis.
+- **The dam network alone:** one edge from (1440, 4673) to (1576, 4694) at crest y 172 (`heightMode: absolute`, bypass) built as a level 34 m dam deck with walls, split into 5 segments (screenshot checked). No power plant or end building spawned with it, so the plant/dam pairing is made by the vanilla placement tool, not by the network.
+- **Conclusion:** a working dam is a one-off best placed by hand in the editor (Hydroelectric Power Plant tool across the river). The automated pieces stand, but nothing links them, and the CS1 reservoir has no water at the site yet.
+
+### Transformer station and power-line attachment
+
+- **Prefabs:** `TransformerStation01` (48×56 m) and `TransformerStation02` (24×32 m), both `BuildingPrefab` with `HasLowVoltageNode`. For CS1 b39573 "SEC Extra Large Substation" (1594.28, 4549.11, rotation 318.04) I used `TransformerStation01`. It placed fine (y 168.3 on the terrain) and shows error icons (no road connection).
+- **Power line ending on coordinates:** a `High-voltage Line` from the existing CS1 line end (node 103851:15, about 45 m away) to the station centre built, but its end was a free node with one segment. **It does not connect:** a line connects only by ending on the building's electricity marker node. `ElectricityBuildingGraphSystem` links a building through orphan sub-net nodes whose prefab carries `ElectricityConnectionData`.
+- **What the station had:** its sub-nets included two `Low-voltage Marker` nodes. Its high-voltage marker was not found in the id range I could probe, which needs the new endpoint.
+- **New in 0.9.13** (needs a game restart):
+  - `GET /entity/subnets?index=&version=` (MCP `cs2_entity_subnets`) lists a building's sub-net nodes and edges, with marker voltage and position.
+  - Network import nodes take `connectTo: {index, version, voltage}`, or `{voltage, radius}` for the nearest building marker, and attach through that node entity.
+  - To test after the restart: place `TransformerStation01`, read its markers, import one HV edge whose end has `connectTo: {voltage: "high"}`, and check `segmentsConnected` on the marker.
+  - No position tolerance applies: the end must be the marker entity itself.
+- **Fix:** undo now also records the short pieces of a split course that the coverage samples missed. The dam test left two 8 m segments, which I removed by hand.
+
+### Climate names
+
+They are not readable offline: the climate prefabs are inside compressed asset bundles, and neither `Locale.cok` nor `Game.dll` names them. The current map uses `TemperateArchipelagoHavenClimate`. After a restart, `GET /prefabs?category=climate`, or any unknown climate in `POST /map/settings`, lists all of them.

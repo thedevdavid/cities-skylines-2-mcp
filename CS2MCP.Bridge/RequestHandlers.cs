@@ -209,6 +209,8 @@ namespace CS2MCP
                     return ReadResources(request);
                 case "/map/settings":
                     return MapSettings(request);
+                case "/entity/subnets":
+                    return EntitySubNets(request);
                 case "/graph/export":
                     return ExportGraph(request);
                 case "/import/tmpe":
