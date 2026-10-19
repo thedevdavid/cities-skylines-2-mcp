@@ -214,3 +214,25 @@ They are not readable offline: the climate prefabs are inside compressed asset b
   1. Find both buildings with `/city/buildings/near`.
   2. List their markers with `/entity/subnets`.
   3. Bulldoze the superseded `e5094_0` / `e32855_0` segments, run `next-run/import-power-ends-x1.json`, and check `segmentsConnected` on each marker.
+
+## Round 15: power ends finished live (game on 0.9.13, Anarchy on)
+
+**Deleted:** the old CS1 stubs 613931:1 and 613979:1, and the tangled pieces of the earlier dam end, 1662725–1662727. Their nodes 599497, 619346, 1662722 and 1662708 went with them.
+
+**Station connector.** Node 599497 (a `High-voltage Line` node owned by the station) turned out to be the station's high-voltage connection. The game had merged it into the CS1 end node at that spot, so it disappeared with the stubs. Re-placing the station regenerated its sub-nets:
+- the old station 599367:1 was demolished;
+- the new `TransformerStation01` is 639618:5 at (1594.28, 4549.11), rotation 318.04, import `transformer-replaced`;
+- its sub-nets are `High-voltage Marker` 639619:5 at (1607.05, 4522.94) and `Low-voltage Marker`s 642613:3 and 642614:3.
+
+**Station end:** segment 548750:5 runs 611632 → 639619:5. The marker has 1 connected segment, so the line is attached through `connectTo {index, version, voltage: high}`.
+
+**Dam end:** a free end, because the saved `HydroelectricPowerPlant01` could not be found by id on 0.9.13 (id scans over 400k–900k and 1.655M–1.67M found nothing). A freshly placed plant has a direct `High-voltage Marker` sub-net 23 m from its centre, so the saved one has lost it the same way the station did. The dam end is segments 598981:9 and 599152:9 (the game split it at its maximum span, pylon 548768:9), from 611610 to free end 598980:9 at (1554.19, 4683.52).
+
+**Still to do (0.9.15):**
+1. Find the plant with `/city/buildings/near?x=1550&z=4690`.
+2. Re-place it, or just read its sub-nets.
+3. Bulldoze 599152:9 and rebuild the last piece from 548768:9 with `connectTo {voltage: high}`.
+
+**Lesson:** never delete the last segment into a building's power connector. When a CS1 line end and the connector share a position, the connector node is that line node, and it goes with the segment.
+
+**Remaining one-segment HV nodes:** only the intended dam free end 598980:9.
