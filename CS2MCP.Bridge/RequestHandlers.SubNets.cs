@@ -42,6 +42,7 @@ namespace CS2MCP
                     position = info.IsNode ? new { x = info.Position.x, y = info.Position.y, z = info.Position.z } : null,
                     voltage = info.Voltage,
                     segmentsConnected = info.Connected,
+                    via = info.Via,
                 });
             }
             return BridgeResponse.Json(new
@@ -61,12 +62,69 @@ namespace CS2MCP
             public float3 Position;
             public string Voltage;
             public int Connected;
+            public string Via;
         }
 
         private List<SubNetInfo> SubNetsOf(Entity building)
         {
-            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             var result = new List<SubNetInfo>();
+            CollectSubNets(building, null, result, 0);
+            return result;
+        }
+
+        /// <summary>
+        /// The entity's own sub-nets, then those of its sub-objects and installed upgrades,
+        /// the places ConnectionWarningSystem looks for a building's network connections.
+        /// </summary>
+        private void CollectSubNets(Entity owner, string via, List<SubNetInfo> result, int depth)
+        {
+            if (EntityManager.HasBuffer<Game.Net.SubNet>(owner))
+            {
+                AddSubNets(owner, via, result);
+            }
+            if (depth >= 2)
+            {
+                return;
+            }
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            if (EntityManager.HasBuffer<Game.Objects.SubObject>(owner))
+            {
+                DynamicBuffer<Game.Objects.SubObject> subObjects = EntityManager.GetBuffer<Game.Objects.SubObject>(owner, isReadOnly: true);
+                var list = new List<Entity>();
+                for (int i = 0; i < subObjects.Length; i++)
+                {
+                    list.Add(subObjects[i].m_SubObject);
+                }
+                foreach (Entity subObject in list)
+                {
+                    if (EntityManager.Exists(subObject) && EntityManager.HasComponent<PrefabRef>(subObject))
+                    {
+                        string name = prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(subObject).m_Prefab, out PrefabBase p) ? p.name : "?";
+                        CollectSubNets(subObject, $"sub-object {name} {subObject.Index}:{subObject.Version}", result, depth + 1);
+                    }
+                }
+            }
+            if (EntityManager.HasBuffer<Game.Buildings.InstalledUpgrade>(owner))
+            {
+                DynamicBuffer<Game.Buildings.InstalledUpgrade> upgrades = EntityManager.GetBuffer<Game.Buildings.InstalledUpgrade>(owner, isReadOnly: true);
+                var list = new List<Entity>();
+                for (int i = 0; i < upgrades.Length; i++)
+                {
+                    list.Add(upgrades[i].m_Upgrade);
+                }
+                foreach (Entity upgrade in list)
+                {
+                    if (EntityManager.Exists(upgrade))
+                    {
+                        CollectSubNets(upgrade, $"upgrade {upgrade.Index}:{upgrade.Version}", result, depth + 1);
+                    }
+                }
+            }
+        }
+
+        private void AddSubNets(Entity building, string via, List<SubNetInfo> result)
+        {
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             DynamicBuffer<Game.Net.SubNet> subNets = EntityManager.GetBuffer<Game.Net.SubNet>(building, isReadOnly: true);
             for (int i = 0; i < subNets.Length; i++)
             {
@@ -81,6 +139,7 @@ namespace CS2MCP
                     Entity = subNet,
                     Prefab = prefabSystem.TryGetPrefab(prefab, out PrefabBase prefabBase) ? prefabBase.name : null,
                     IsNode = EntityManager.HasComponent<Node>(subNet),
+                    Via = via,
                 };
                 if (info.IsNode)
                 {
@@ -95,9 +154,16 @@ namespace CS2MCP
                         ? "high"
                         : "low";
                 }
+                else if (EntityManager.HasComponent<NetData>(prefab))
+                {
+                    // Power-line nodes and markers: the voltage is the net's power layer.
+                    Layer layers = EntityManager.GetComponentData<NetData>(prefab).m_RequiredLayers;
+                    info.Voltage = (layers & Layer.PowerlineHigh) != 0 ? "high"
+                        : (layers & Layer.PowerlineLow) != 0 ? "low"
+                        : null;
+                }
                 result.Add(info);
             }
-            return result;
         }
 
         /// <summary>

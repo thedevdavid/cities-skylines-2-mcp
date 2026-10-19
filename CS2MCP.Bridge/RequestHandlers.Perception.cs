@@ -481,6 +481,25 @@ namespace CS2MCP
             if (EntityManager.HasComponent<Game.Common.Destroyed>(entity)) flags.Add("destroyed");
             if (EntityManager.HasComponent<Game.Common.Owner>(entity)) flags.Add("hasOwner");
             result["flags"] = flags;
+            if (EntityManager.HasComponent<Game.Common.Owner>(entity))
+            {
+                Entity owner = EntityManager.GetComponentData<Game.Common.Owner>(entity).m_Owner;
+                result["owner"] = new { index = owner.Index, version = owner.Version };
+            }
+            if (EntityManager.HasComponent<Game.Net.Node>(entity))
+            {
+                float3 p = EntityManager.GetComponentData<Game.Net.Node>(entity).m_Position;
+                result["position"] = new { x = p.x, y = p.y, z = p.z };
+                result["segmentsConnected"] = EntityManager.HasBuffer<Game.Net.ConnectedEdge>(entity)
+                    ? EntityManager.GetBuffer<Game.Net.ConnectedEdge>(entity, isReadOnly: true).Length
+                    : 0;
+            }
+            if (EntityManager.HasComponent<Game.Net.Edge>(entity))
+            {
+                Game.Net.Edge ends = EntityManager.GetComponentData<Game.Net.Edge>(entity);
+                result["startNode"] = new { index = ends.m_Start.Index, version = ends.m_Start.Version };
+                result["endNode"] = new { index = ends.m_End.Index, version = ends.m_End.Version };
+            }
 
             if (EntityManager.HasBuffer<Game.Buildings.Renter>(entity))
             {

@@ -198,7 +198,7 @@ namespace CS2MCP
         /// <summary>Buildings around a point with their footprint and what kind they are, nearest first.</summary>
         private BridgeResponse BuildingsNear(BridgeRequest request)
         {
-            if (!TryGetCity(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }

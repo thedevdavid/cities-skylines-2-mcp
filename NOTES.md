@@ -155,7 +155,7 @@ New, not yet run in the game: `POST /import/tmpe` (+ undo, status), MCP `cs2_imp
 Offline (`--write-only`): 27 nodes, 68 connections, 39 arrow lanes (37 superseded by connections, as in TM:PE), 0 direction inconsistencies, all lane ends resolved through `import-all.json` geometry.
 
 Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported network):
-1. `cs2_ping` shows `0.9.13-editor-import`.
+1. `cs2_ping` shows `0.9.14-editor-import`.
 2. `node scripts/import-tmpe.mjs --dry-run`. Expect 27 nodes matched; read `out/tmpe-import-report.md` for skipped connections (lane-count mismatches) and `offsetDelta`/`rankAgrees` per lane.
 3. `node scripts/import-tmpe.mjs`. Open Traffic's Lane Connector on 2–3 listed junctions (e.g. CS1 node 11611 near -6461,1078; 9988 near -6198,627): the custom connections should show, and lanes without custom connections keep defaults.
 4. Save the map, return to the menu, reload, check the same junctions again (Traffic's loader validates the data and would reset invalid nodes; `Traffic.log` says so).
@@ -200,3 +200,17 @@ All test placements below were undone afterwards. The map is as it was before th
 ### Climate names
 
 They are not readable offline: the climate prefabs are inside compressed asset bundles, and neither `Locale.cok` nor `Game.dll` names them. The current map uses `TemperateArchipelagoHavenClimate`. After a restart, `GET /prefabs?category=climate`, or any unknown climate in `POST /map/settings`, lists all of them.
+
+## Round 14 (0.9.14): power-line attachment, still to verify
+
+- On 0.9.13, `connectTo {voltage: high}` found no high-voltage marker on `TransformerStation01` or `HydroelectricPowerPlant01`. The station's own sub-nets are two `Low-voltage Marker` nodes.
+- `ConnectionWarningSystem` also counts the sub-nets of a building's **sub-objects** and installed upgrades. The high-voltage connector is most likely there, e.g. on the station's gantry object.
+- What 0.9.14 adds:
+  - `/entity/subnets` and `connectTo` walk sub-objects and upgrades (2 levels deep) and read the voltage also from the net's power layers. Each entry names its `via`.
+  - `/city/buildings/near` works in the editor, so building ids can be found.
+  - `/entity/inspect` shows the owner, node positions with segment counts, and an edge's end nodes.
+  - Edges of rejected nodes now say "skipped because its node X was rejected".
+- To do after the restart:
+  1. Find both buildings with `/city/buildings/near`.
+  2. List their markers with `/entity/subnets`.
+  3. Bulldoze the superseded `e5094_0` / `e32855_0` segments, run `next-run/import-power-ends-x1.json`, and check `segmentsConnected` on each marker.

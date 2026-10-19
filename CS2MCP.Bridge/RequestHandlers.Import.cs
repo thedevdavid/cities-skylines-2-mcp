@@ -186,6 +186,7 @@ namespace CS2MCP
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
             var nodeIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            var rejectedNodes = new HashSet<string>(StringComparer.Ordinal);
             var explicitElevation = new List<bool>(body.nodes.Count);
             foreach (ImportNodeDto dto in body.nodes)
             {
@@ -230,6 +231,7 @@ namespace CS2MCP
                     if (!TryResolveConnect(dto.connectTo, node.XZ, out Entity marker, out string why))
                     {
                         problems.Add($"node '{dto.id}': {why}");
+                        rejectedNodes.Add(dto.id);
                         continue;
                     }
                     node.Entity = marker;
@@ -258,6 +260,11 @@ namespace CS2MCP
                 if (!edgeIds.Add(dto.id))
                 {
                     problems.Add($"duplicate edge id '{dto.id}'");
+                    continue;
+                }
+                if ((dto.a != null && rejectedNodes.Contains(dto.a)) || (dto.b != null && rejectedNodes.Contains(dto.b)))
+                {
+                    problems.Add($"edge '{dto.id}': skipped because its node '{(rejectedNodes.Contains(dto.a ?? "") ? dto.a : dto.b)}' was rejected (see that node's problem)");
                     continue;
                 }
                 if (dto.a == null || dto.b == null || !nodeIndex.TryGetValue(dto.a, out int a) || !nodeIndex.TryGetValue(dto.b, out int b))
