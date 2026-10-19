@@ -155,7 +155,7 @@ New, not yet run in the game: `POST /import/tmpe` (+ undo, status), MCP `cs2_imp
 Offline (`--write-only`): 27 nodes, 68 connections, 39 arrow lanes (37 superseded by connections, as in TM:PE), 0 direction inconsistencies, all lane ends resolved through `import-all.json` geometry.
 
 Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported network):
-1. `cs2_ping` shows `0.9.14-editor-import`.
+1. `cs2_ping` shows `0.9.16-editor-import`.
 2. `node scripts/import-tmpe.mjs --dry-run`. Expect 27 nodes matched; read `out/tmpe-import-report.md` for skipped connections (lane-count mismatches) and `offsetDelta`/`rankAgrees` per lane.
 3. `node scripts/import-tmpe.mjs`. Open Traffic's Lane Connector on 2–3 listed junctions (e.g. CS1 node 11611 near -6461,1078; 9988 near -6198,627): the custom connections should show, and lanes without custom connections keep defaults.
 4. Save the map, return to the menu, reload, check the same junctions again (Traffic's loader validates the data and would reset invalid nodes; `Traffic.log` says so).
@@ -236,3 +236,30 @@ They are not readable offline: the climate prefabs are inside compressed asset b
 **Lesson:** never delete the last segment into a building's power connector. When a CS1 line end and the connector share a position, the connector node is that line node, and it goes with the segment.
 
 **Remaining one-segment HV nodes:** only the intended dam free end 598980:9.
+
+## Round 16 (0.9.16): checklist, settings persistence, bridge styles, run order
+
+1. **`GET /map/checklist`** (MCP `cs2_map_checklist`), described in MAP_SETTINGS.md. Not yet run in the game.
+2. **Latitude/longitude cannot persist per map.** `ClimateSystem.PostDeserialize` resets `PlanetarySystem.latitude/longitude` from the climate prefab on every load. `/map/settings` now labels them "this session only". Choose the climate for the coordinates you want.
+3. **Bridge styles:** CS2 has no per-segment bridge style. `CompositionFlags` hold no bridge-style flag; the general flags are Elevated, Tunnel, Lighting, Pavement/Gravel/Tiles, StyleBreak and similar. An elevated segment's look comes from its net prefab's elevated composition (pillars, deck). The only way to vary it is a different prefab per edge, which `/import/network` already takes.
+   - **Candidate bridge prefabs from the localisation keys** (types unverified; check with `/prefabs?category=net&query=Bridge`):
+     - cable-stayed roads: `Cable Stayed Bridge - 4 lanes`, `Cable-Stayed Bridge - Highway Oneway - 3 Lanes`, `Cable-Stayed Bridge - Small Road - 2 lanes`, `Cable-stayed Bridge - XL Road Divided - 8 Lanes`;
+     - other roads: `Suspension Bridge - Medium Road`, `Golden Gate Bridge`, `Grand Bridge`;
+     - truss arch and extradosed: `TrussArchBridge01Net` (and `TrussArchBridge01`), `ExtradosedBridge01`;
+     - bike and pedestrian: `Arc Pedestrian Bridge`, `Arc Bike Bridge`, `Covered Pedestrian Bridge`, `Covered Bike Bridge`, `Cable Stayed Pedestrian Bridge`, `Cable Stayed Bike Bridge`.
+   - **Mapping:** the converter can map CS1 Network Skins truss arches to `TrussArchBridge01Net` where lanes and span allow, and leave deck viaducts as the normal elevated road.
+   - **No bridge code was added.**
+4. **Back-to-back imports (tools/import-run.mjs):**
+   - **One at a time:** each POST answers only after its tool has finished and handed the active tool back, so awaiting each request is enough. No extra delay is needed: every import starts with 3 warm-up frames, and `settleFrames` is per batch. Sending a second import while one runs returns 409.
+   - **Separate tools, one guard:** network/water (import tool) and objects/surfaces (object tool) are separate tools, but one busy check covers both.
+   - **Resources:** they write synchronously.
+   - **Order:**
+     1. sea level / map settings;
+     2. networks, including power and ship paths, so border connections and power nodes exist;
+     3. outside-connection check;
+     4. surfaces;
+     5. objects and trees (trees last, by far the longest);
+     6. water;
+     7. resources (any time);
+     8. checklist.
+   - **Avoid:** never delete the last segment into a building's power connector (round 15).

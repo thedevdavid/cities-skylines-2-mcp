@@ -22,7 +22,7 @@
 
 Saving is always by hand: the editor's Save Map dialog builds the map metadata (name, preview, playability checklist) at save time.
 
-Things the playability checklist (`MapRequirementSystem`) wants before a map can be published: a starting area, an inbound and an outbound road connection, and the other items listed under the editor's checklist.
+Things the playability checklist (`MapRequirementSystem`) wants before a map can be published: a starting area, water in it, a road outside connection and a map name (details below).
 
 ## Playability checklist (`GET /map/checklist`, MCP `cs2_map_checklist`)
 
