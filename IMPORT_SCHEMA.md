@@ -58,6 +58,7 @@ A node has exactly one height. All edges meeting at a node use it, so conflictin
 | `control` | Optional. Two points = the cubic Bézier control points b and c; one point = a quadratic control point. Only x and z are used; heights follow the terrain plus the interpolated end elevations. |
 | `elevation` | Optional `[e1, e2]`, used only for nodes that have no `elevation` of their own. |
 | `attachTo` | Optional `{a?: {radius, prefabContains?}, b?: {...}}`: `snapToSegment` for that end's node, unless the node has its own. |
+| `wall` | Optional `left`, `right`, `both` or `none`. Forces a wall on that side whatever the elevation (quays). Left and right are seen travelling from `a` to `b`. The edge definition carries `Game.Net.Upgraded` with `CompositionFlags.Side.Raised` on that side. `GenerateEdgesSystem` copies it onto the new edge, and `CompositionSelectSystem` ORs upgrade flags into the composition, the same mechanism as road upgrades and the mods that add retaining walls. It only shows a wall where the net has a composition for raised sides (quays do; other roads only with such an asset). |
 
 End-to-end length must be 4–1500 m. The game may split an edge into several segments where it crosses other networks; all of them are reported.
 
@@ -190,8 +191,8 @@ MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/object
 | `x`, `z` | CS2 metres as in `/import/network`; must lie within ±7168 (+1 m). |
 | `y` | Optional absolute height. Omitted: the terrain surface at x,z. Above the terrain it becomes the object's elevation. |
 | `rotation` | Yaw in degrees, `quaternion.RotateY(radians)` = Unity `Quaternion.Euler(0, rotation, 0)`: 0 = prefab forward along +z, positive turns clockwise seen from above (90 = facing +x). To be confirmed in-game with an asymmetric building. |
-| `kind` | Hint only; the bridge classifies by prefab components (`tree`, `plant`, `building`, `outsideConnection`, `object`) and reports mismatches as warnings. |
-| `age` | Trees and bushes: `seedling` (AgeMask.Sapling), `sapling` (young/teen, AgeMask.Young), `adult` (default, AgeMask.Mature), `elderly` (AgeMask.Elderly). |
+| `kind` | Hint only; the bridge classifies by prefab components (`tree`, `plant`, `building`, `outsideConnection`, `object`) and reports mismatches as warnings. `prop` and `decal` are accepted as aliases of `object`. |
+| `age` | Trees and bushes: `seedling` (AgeMask.Sapling, age 0), `sapling` (young/teen, AgeMask.Young, 0.175), `adult` (default, AgeMask.Mature, 0.425), `elderly` (AgeMask.Elderly, 0.775). Honoured in the editor too since 0.9.10 (the vanilla editor path picks a random age, 5 % of trees dead); never dead. Plants without `TreeData` (grass, ferns, flowers) ignore it. |
 | `net` | Outside connections: `road` or `rail` (see below); anything else (e.g. `air`, `ship`) places the prefab as a free border object. |
 
 Placement: each object becomes one definition from the bridge's port of the game's LineTool/ObjectTool definition job (`CreateDefinitions`), so buildings get their sub-objects, lots and terraforming, placeholder prefabs (`…Random01`) pick a variant, and trees get their age. Batches go through `ToolOutputBarrier` with the network importer's handshake (Clear → None → Apply, bisection on rejection). New objects are matched to ids by position among the batch's Temp objects (the game turns the Temp entity into the permanent one), so there are no full-map scans. `bypassValidation` sets `ToolSystem.ignoreErrors` for the import.

@@ -447,6 +447,9 @@ namespace CS2MCP
             definitions.m_LefthandTraffic = m_CityConfigurationSystem.leftHandTraffic;
             definitions.m_Theme = m_CityConfigurationSystem.defaultTheme;
             definitions.m_AgeMask = AgeMask.Mature;
+            // The requested age in the editor too: one AgeMask bit gives one fixed age
+            // (ToolUtils.GetRandomAge: 0, 0.175, 0.425, 0.775), never a dead tree.
+            definitions.m_FixedAge = true;
             definitions.m_AttachmentPrefab = default;
             definitions.m_OwnerData = GetComponentLookup<Owner>(true);
             definitions.m_TransformData = GetComponentLookup<Transform>(true);

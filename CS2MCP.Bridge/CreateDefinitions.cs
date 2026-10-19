@@ -51,6 +51,9 @@ namespace CS2MCP
         public RandomSeed m_RandomSeed;
         [ReadOnly]
         public AgeMask m_AgeMask;
+        /// <summary>Use m_AgeMask also in editor mode (the vanilla editor picks a random age, 5 % of them dead).</summary>
+        [ReadOnly]
+        public bool m_FixedAge;
         [ReadOnly]
         public ControlPoint m_ControlPoint;
         [ReadOnly]
@@ -487,7 +490,7 @@ namespace CS2MCP
                     component2.m_Elevation = elevation;
                 }
 
-                if (m_EditorMode)
+                if (m_EditorMode && !m_FixedAge)
                 {
                     component2.m_Age = random.NextFloat(1f);
                 }

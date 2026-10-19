@@ -1703,6 +1703,10 @@ server.registerTool(
             control: z.array(importPoint).min(1).max(2).optional(),
             elevation: z.tuple([z.number(), z.number()]).optional(),
             attachTo: z.object({ a: importSnap.optional(), b: importSnap.optional() }).optional(),
+            wall: z
+              .enum(["left", "right", "both", "none"])
+              .optional()
+              .describe("Force quay/retaining walls: Side.Raised upgrade on that side (left/right seen from a to b)"),
           }),
         )
         .optional(),

@@ -72,6 +72,8 @@ namespace CS2MCP
             public string PrefabName;
             public Entity Prefab;
             public float2[] Control;
+            /// <summary>Upgrade flags forced on the new segment (quay walls: Side.Raised on the wall side).</summary>
+            public CompositionFlags Upgrades;
             public string Status = "pending";
             public string Error;
             public List<Entity> Segments = new List<Entity>();
@@ -1131,6 +1133,12 @@ namespace CS2MCP
             });
             commandBuffer.AddComponent(entity, default(Updated));
             commandBuffer.AddComponent(entity, course);
+            if (edge.Upgrades != default(CompositionFlags))
+            {
+                // GenerateEdgesSystem copies the definition's Upgraded onto the new edge and
+                // CompositionSelectSystem ORs it into the composition, as road upgrades do.
+                commandBuffer.AddComponent(entity, new Upgraded { m_Flags = edge.Upgrades });
+            }
             return EdgeDefinition.Defined;
         }
 

@@ -199,7 +199,10 @@ namespace CS2MCP
                 }
                 obj.Prefab = prefabEntity;
                 obj.Kind = KindOf(prefabEntity);
-                if (!string.IsNullOrEmpty(hint) && !string.Equals(hint, obj.Kind, StringComparison.OrdinalIgnoreCase)
+                string hintKind = string.Equals(hint, "prop", StringComparison.OrdinalIgnoreCase) || string.Equals(hint, "decal", StringComparison.OrdinalIgnoreCase)
+                    ? "object"
+                    : hint;
+                if (!string.IsNullOrEmpty(hintKind) && !string.Equals(hintKind, obj.Kind, StringComparison.OrdinalIgnoreCase)
                     && job.Warnings.Count < 1000)
                 {
                     job.Warnings.Add($"object '{dto.id}': kind '{hint}' given, prefab '{dto.prefab}' is a {obj.Kind}");

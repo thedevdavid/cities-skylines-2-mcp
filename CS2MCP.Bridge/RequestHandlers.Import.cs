@@ -56,6 +56,7 @@ namespace CS2MCP
             public float[][] control;
             public float[] elevation;
             public ImportAttachDto attachTo;
+            public string wall;
         }
 
         public sealed class ImportOptionsDto
@@ -313,6 +314,26 @@ namespace CS2MCP
                     }
                 }
 
+                CompositionFlags upgrades = default;
+                switch ((dto.wall ?? "").Trim().ToLowerInvariant())
+                {
+                    case "":
+                    case "none":
+                        break;
+                    case "left":
+                        upgrades.m_Left |= CompositionFlags.Side.Raised;
+                        break;
+                    case "right":
+                        upgrades.m_Right |= CompositionFlags.Side.Raised;
+                        break;
+                    case "both":
+                        upgrades.m_Left |= CompositionFlags.Side.Raised;
+                        upgrades.m_Right |= CompositionFlags.Side.Raised;
+                        break;
+                    default:
+                        problems.Add($"edge '{dto.id}': wall must be left, right, both or none");
+                        continue;
+                }
                 job.Edges.Add(new BridgeImportToolSystem.ImportEdge
                 {
                     Id = dto.id,
@@ -321,6 +342,7 @@ namespace CS2MCP
                     PrefabName = dto.prefab,
                     Prefab = prefabEntity,
                     Control = control,
+                    Upgrades = upgrades,
                 });
             }
 
