@@ -263,3 +263,25 @@ They are not readable offline: the climate prefabs are inside compressed asset b
      7. resources (any time);
      8. checklist.
    - **Avoid:** never delete the last segment into a building's power connector (round 15).
+
+## Round 17: A-v3 power ends finished live (0.9.17)
+
+**Found:** the station connector was merged into the CS1 line end node 98045:47 (owner `TransformerStation01` 192673:1). So the old station stub 104122:29 (97954 → 98045) already **is** the station end, connected, and was kept. A duplicate `TransformerStation01` (166492:1, no high-voltage connector) sat on the same spot and was deleted. The dam line ran through the station connector to the plant marker.
+
+**Deleted (`force=true`):** 104320:27 (old dam stub), 2219720:1 and 2219721:1. Deleting 2219721 removed the plant's `High-voltage Marker` 192772:3 as well: even a real marker prefab goes with its last segment.
+
+**Plant re-placed:** `HydroelectricPowerPlant01` 192771:3 → **52058:17** at (1549.5, 4690), rotation 261.7 (facing −98°). Its new marker is **52059:17** at (1531.05, 4664.07).
+
+**Dam end:** import `imp-20261019-170401-10`, 98501 → `connectTo` the plant. The game routed it through the station connector by itself: segments **52051:19** (98501 → 98045) and **52052:19** (98045 → 52059). That is why the report said "2 of 3 points". A power line passing near a building's high-voltage connector attaches to it, as with the vanilla tool.
+
+**Result:**
+- station connector 98045 has 3 segments (104122, 52051, 52052);
+- plant marker 52059 has 1 segment;
+- no high-voltage node is left with one segment;
+- both circuits now meet at the station. That is electrically valid. Routing the dam line through a waypoint more than about 45 m from the station would keep them separate.
+
+**Checklist** (`GET /map/checklist`):
+- **Required:** starting tiles ✔ (9), water ✔, road connection ✔ (22 border nodes), map name ✘ (enter one by hand).
+- **Optional:** all ✔ (train 4, air, electricity, oil, ore, forest, fertile).
+- **Publishing:** description ✘; preview and thumbnail ✔.
+- `playable` is false only because of the map name.

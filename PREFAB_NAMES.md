@@ -113,3 +113,14 @@ for p in EU_Wall01 EU_Wall01Long EU_Wall01Short EU_Wall01ExtraShort EU_Wall03 EU
 - **Closest whole-asset options:** `RuinsCastle01` (castle ruin), `OldCastle01`, and the landmark building `ServiceBuildingMedievalCastle`. `MedievalCastleMasterSpots` and `MedievalCastleSpotShow01–03` are effect/marker objects, not walls.
 - **Natural stone accents along a line:** `StandingStone01–08`, `RuinsStoneFormation01–02` and `RuinsStoneCairns01–03`.
 - **Keeping a continuous wall:** use the stoniest `EU_Wall` style (pick visually in game; styles 01–09 differ in material), or a PDX Mods wall pack from the playset (list with `cs2_find_prefabs` category `object`, query `Wall`).
+
+**Measured live (0.9.17, `/prefabs/info`):** the length runs along the prefab's local **z** axis, so a piece placed with yaw r runs along heading r (0 = +z). The origin is the piece centre.
+
+| Prefab | Length (z) | Height (y) | Thickness (x) |
+|---|---|---|---|
+| `EU_Wall01`, `EU_Wall03` | 3.00 m | 0.90 m | 0.19 / 0.18 m |
+| `EU_Wall01Long`, `EU_Wall03Long` | 5.00 m | 0.90 m | 0.19 / 0.18 m |
+| `EU_Wall01Short`, `EU_Wall03Short` | 1.00 m | 0.90 m | 0.19 / 0.18 m |
+| `EU_Wall01ExtraShort`, `EU_Wall03ExtraShort` | 0.50 m | 0.90 m | 0.19 / 0.18 m |
+
+At 0.9 m high, these are garden walls, not fort walls.
