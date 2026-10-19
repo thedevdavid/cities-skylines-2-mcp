@@ -1,6 +1,6 @@
 # Editor import: notes and manual verification
 
-Branch `editor-import` (local, not pushed). Bridge version `0.9.8-editor-import` (shown by `cs2_ping`). Built with 0 warnings and deployed to `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2MCP\CS2MCP.dll`. MCP server rebuilt (`mcp-server/dist/index.js`). **Nothing here has run inside the game yet.**
+Branch `editor-import` (local, not pushed). Bridge version `0.9.9-editor-import` (shown by `cs2_ping`). Built with 0 warnings and deployed to `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2MCP\CS2MCP.dll`. MCP server rebuilt (`mcp-server/dist/index.js`). **Nothing here has run inside the game yet.**
 
 ## What changed
 
@@ -126,3 +126,12 @@ Surfaces are area entities: a polygon of `Game.Areas.Node` with the `Surface` ta
 Add to the next verification run (after the round-7 list):
 
 5. A grass rectangle and an L-shaped sand polygon on dakota-v8: run `cs2_import_surfaces` with a dry run, then for real. Check that both render, then undo by name and check that they are gone.
+
+## Round 9 (0.9.9): prefab listing for custom assets, ship paths
+
+`GET /prefabs` gains `category=object` (every object prefab: props, decals, rocks, bushes, markers; custom ones included) and `category=surface`, plus `offset` and `limit` up to 1000 for paging (MCP `cs2_find_prefabs`). The ship-path prefab names (`Narrow/Medium/Wide Seaway`, `Narrow/Medium/Wide Boatway`) and the decal answer are in PREFAB_NAMES.md.
+
+Add to the next verification run:
+
+6. Ship paths: import one `Medium Seaway` edge over water that ends on the border. Check whether the border node gets `Ship Outside Connection - Twoway` automatically, as roads do: run `cs2_import_objects` with `kind: outsideConnection, net: road` replaced by a look with `cs2_road_graph allNets` plus Scene Explorer on the node. If not, place `Ship Outside Connection - Twoway` with `/import/objects` (`kind: outsideConnection, net: ship`; snapped to the border) and see whether the game accepts it.
+7. Custom asset packs (grass props, rocks, decals from PDX Mods): run `cs2_find_prefabs` with category `object` and a pack-specific query. The names must appear. Then dry-run `/import/objects` with a few of those names (they must resolve), place one decal and one rock for real, and undo.

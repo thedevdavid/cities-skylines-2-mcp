@@ -31,6 +31,21 @@ namespace CS2MCP
         }
 
         private const int kMaxSurfaceNodes = 2000;
+        private EntityQuery m_SurfacePrefabQuery;
+        private bool m_SurfacePrefabQueryCreated;
+
+        private EntityQuery SurfacePrefabQuery
+        {
+            get
+            {
+                if (!m_SurfacePrefabQueryCreated)
+                {
+                    m_SurfacePrefabQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
+                    m_SurfacePrefabQueryCreated = true;
+                }
+                return m_SurfacePrefabQuery;
+            }
+        }
         private int m_SurfaceImportCounter;
 
         private BridgeResponse ImportSurfaces(BridgeRequest request)

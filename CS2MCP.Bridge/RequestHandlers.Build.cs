@@ -224,12 +224,20 @@ namespace CS2MCP
                 case "tree":
                     query = TreePrefabQuery;
                     break;
+                case "object":
+                    // Every object prefab: props, decals, rocks, bushes, markers, buildings, trees.
+                    query = ObjectPrefabQuery;
+                    break;
+                case "surface":
+                    query = SurfacePrefabQuery;
+                    break;
                 default:
-                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths) or 'tree'");
+                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), 'tree', 'object' (all object prefabs incl. props and decals) or 'surface'");
             }
 
             request.Query.TryGetValue("query", out string search);
-            int limit = request.TryGetInt("limit", out int rawLimit) ? math.clamp(rawLimit, 1, 200) : 50;
+            int limit = request.TryGetInt("limit", out int rawLimit) ? math.clamp(rawLimit, 1, 1000) : 50;
+            int offset = request.TryGetInt("offset", out int rawOffset) ? math.max(rawOffset, 0) : 0;
 
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             var results = new List<object>();
@@ -249,7 +257,7 @@ namespace CS2MCP
                         continue;
                     }
                     total++;
-                    if (results.Count < limit)
+                    if (total > offset && results.Count < limit)
                     {
                         results.Add(new
                         {
@@ -265,6 +273,7 @@ namespace CS2MCP
             {
                 category,
                 totalMatches = total,
+                offset,
                 returned = results.Count,
                 note = "use the exact 'name' value with /build/place; locked prefabs need milestone progress",
                 stalenessWarning = editor ? null : LockStalenessWarning,

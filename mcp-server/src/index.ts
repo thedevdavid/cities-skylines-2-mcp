@@ -366,18 +366,20 @@ server.registerTool(
       "'FireHouse', 'WindTurbine', 'Highway'.",
     inputSchema: {
       category: z
-        .enum(["building", "road", "net", "tree"])
+        .enum(["building", "road", "net", "tree", "object", "surface"])
         .optional()
-        .describe("Prefab category (default building); 'net' = all networks incl. train tracks, pipes, power lines, pedestrian paths"),
+        .describe("Prefab category (default building); 'net' = all networks incl. train tracks, seaways, pipes, power lines, paths; 'object' = every object prefab (props, decals, rocks, bushes, markers, trees, buildings, incl. PDX Mods assets); 'surface' = surface areas"),
       query: z.string().optional().describe("Case-insensitive name substring filter"),
-      limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)"),
+      limit: z.number().int().min(1).max(1000).optional().describe("Max results (default 50)"),
+      offset: z.number().int().min(0).optional().describe("Skip this many matches (paging)"),
     },
   },
-  async ({ category, query, limit }) => {
+  async ({ category, query, limit, offset }) => {
     const params = new URLSearchParams();
     if (category) params.set("category", category);
     if (query) params.set("query", query);
     if (limit) params.set("limit", String(limit));
+    if (offset) params.set("offset", String(offset));
     try {
       return jsonResult(await bridgeJson(`/prefabs?${params.toString()}`));
     } catch (err) {
