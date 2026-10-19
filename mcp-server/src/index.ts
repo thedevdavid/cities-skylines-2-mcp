@@ -366,7 +366,7 @@ server.registerTool(
       "'FireHouse', 'WindTurbine', 'Highway'.",
     inputSchema: {
       category: z
-        .enum(["building", "road", "net", "tree", "object", "surface"])
+        .enum(["building", "road", "net", "tree", "object", "surface", "climate", "theme"])
         .optional()
         .describe("Prefab category (default building); 'net' = all networks incl. train tracks, seaways, pipes, power lines, paths; 'object' = every object prefab (props, decals, rocks, bushes, markers, trees, buildings, incl. PDX Mods assets); 'surface' = surface areas"),
       query: z.string().optional().describe("Case-insensitive name substring filter"),
