@@ -1680,6 +1680,7 @@ server.registerTool(
     inputSchema: {
       file: z.string().optional().describe("Path to an import JSON file (read by the MCP server)"),
       name: z.string().optional().describe("Label stored with the import"),
+      dryRun: z.boolean().optional().describe("Validate only, build nothing (same as options.dryRun; overrides the file)"),
       nodes: z
         .array(
           z.object({
@@ -1729,7 +1730,7 @@ server.registerTool(
         .optional(),
     },
   },
-  async ({ file, name, nodes, edges, options }) => {
+  async ({ file, name, nodes, edges, options, dryRun }) => {
     try {
       let body: Record<string, unknown>;
       if (file) {
@@ -1741,6 +1742,7 @@ server.registerTool(
       }
       if (name !== undefined) body.name = name;
       if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      if (dryRun !== undefined) body.options = { ...(body.options as object | undefined), dryRun };
       const { ok, payload } = await bridgePost("/import/network", body, IMPORT_TIMEOUT_MS);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
     } catch (err) {
@@ -1988,6 +1990,7 @@ server.registerTool(
     inputSchema: {
       file: z.string().optional().describe("Path to the import JSON file (read by the MCP server)"),
       name: z.string().optional().describe("Import name, also the undo key"),
+      dryRun: z.boolean().optional().describe("Validate only, build nothing (same as options.dryRun; overrides the file)"),
       options: z
         .object({
           dryRun: z.boolean().optional(),
@@ -2014,11 +2017,12 @@ server.registerTool(
         .optional(),
     },
   },
-  async ({ file, name, options, objects }) => {
+  async ({ file, name, options, objects, dryRun }) => {
     try {
       const body = await readJsonBody(file, objects ? { objects } : undefined);
       if (name !== undefined) body.name = name;
       if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      if (dryRun !== undefined) body.options = { ...(body.options as object | undefined), dryRun };
       const { ok, payload } = await bridgePost("/import/objects", body, IMPORT_TIMEOUT_MS);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
     } catch (err) {
@@ -2039,6 +2043,7 @@ server.registerTool(
     inputSchema: {
       file: z.string().optional().describe("Path to the surfaces JSON file"),
       name: z.string().optional().describe("Import name, also the undo key"),
+      dryRun: z.boolean().optional().describe("Validate only, build nothing (same as options.dryRun; overrides the file)"),
       options: z
         .object({
           dryRun: z.boolean().optional(),
@@ -2059,11 +2064,12 @@ server.registerTool(
         .optional(),
     },
   },
-  async ({ file, name, options, surfaces }) => {
+  async ({ file, name, options, surfaces, dryRun }) => {
     try {
       const body = await readJsonBody(file, surfaces ? { surfaces } : undefined);
       if (name !== undefined) body.name = name;
       if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      if (dryRun !== undefined) body.options = { ...(body.options as object | undefined), dryRun };
       const { ok, payload } = await bridgePost("/import/surfaces", body, IMPORT_TIMEOUT_MS);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
     } catch (err) {

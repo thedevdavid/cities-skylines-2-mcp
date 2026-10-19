@@ -76,6 +76,8 @@ namespace CS2MCP
             public List<ImportNodeDto> nodes;
             public List<ImportEdgeDto> edges;
             public ImportOptionsDto options;
+            /// <summary>Accepted at the top level too (same as options.dryRun).</summary>
+            public bool? dryRun;
         }
 
         private const float kImportMinEdgeLength = 4f;
@@ -368,7 +370,7 @@ namespace CS2MCP
                 job.Warnings.Add($"{unusedNodes} node(s) are not used by any edge and were skipped");
             }
 
-            if (options.dryRun == true)
+            if (options.dryRun == true || body.dryRun == true)
             {
                 return BridgeResponse.Json(new
                 {

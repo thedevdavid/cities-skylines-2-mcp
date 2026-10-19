@@ -46,6 +46,7 @@ namespace CS2MCP
             public string name;
             public ObjectOptionsDto options;
             public List<ObjectDto> objects;
+            public bool? dryRun;
         }
 
         private const float kPlayableHalf = 7168f;
@@ -253,7 +254,7 @@ namespace CS2MCP
                 }, 400);
             }
 
-            if (options.dryRun == true)
+            if (options.dryRun == true || body.dryRun == true)
             {
                 var connections = new List<object>();
                 foreach (BridgeObjectToolSystem.ImportObject obj in job.Objects)

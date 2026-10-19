@@ -50,6 +50,56 @@ namespace CS2MCP
             public float? cameraZoom;
         }
 
+        private EntityQuery m_ClimatePrefabQuery;
+        private bool m_ClimatePrefabQueryCreated;
+        private EntityQuery m_ThemePrefabQuery;
+        private bool m_ThemePrefabQueryCreated;
+
+        private EntityQuery ClimatePrefabQuery
+        {
+            get
+            {
+                if (!m_ClimatePrefabQueryCreated)
+                {
+                    m_ClimatePrefabQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<ClimateData>());
+                    m_ClimatePrefabQueryCreated = true;
+                }
+                return m_ClimatePrefabQuery;
+            }
+        }
+
+        private EntityQuery ThemePrefabQuery
+        {
+            get
+            {
+                if (!m_ThemePrefabQueryCreated)
+                {
+                    m_ThemePrefabQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<ThemeData>());
+                    m_ThemePrefabQueryCreated = true;
+                }
+                return m_ThemePrefabQuery;
+            }
+        }
+
+        /// <summary>Names of the prefabs a query matches, for error messages.</summary>
+        private string PrefabNames(EntityQuery query)
+        {
+            PrefabSystem prefabs = World.GetOrCreateSystemManaged<PrefabSystem>();
+            var names = new List<string>();
+            using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity entity in entities)
+                {
+                    if (prefabs.TryGetPrefab(entity, out PrefabBase prefab))
+                    {
+                        names.Add(prefab.name);
+                    }
+                }
+            }
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            return string.Join(", ", names);
+        }
+
         private BridgeResponse MapSettings(BridgeRequest request)
         {
             if (!TryGetCityOrEditor(out bool editor, out BridgeResponse error))
@@ -168,7 +218,7 @@ namespace CS2MCP
                 }
                 else
                 {
-                    problems.Add($"unknown theme prefab '{body.theme}' (e.g. European, North American)");
+                    problems.Add($"unknown theme prefab '{body.theme}'; available: {PrefabNames(ThemePrefabQuery)}");
                 }
             }
             // Climate before latitude/longitude: the climate prefab carries its own
@@ -183,7 +233,7 @@ namespace CS2MCP
                 }
                 else
                 {
-                    problems.Add($"unknown climate prefab '{body.climate}'");
+                    problems.Add($"unknown climate prefab '{body.climate}'; available: {PrefabNames(ClimatePrefabQuery)}");
                 }
             }
             PlanetarySystem planet = World.GetOrCreateSystemManaged<PlanetarySystem>();

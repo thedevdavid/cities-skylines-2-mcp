@@ -231,8 +231,14 @@ namespace CS2MCP
                 case "surface":
                     query = SurfacePrefabQuery;
                     break;
+                case "climate":
+                    query = ClimatePrefabQuery;
+                    break;
+                case "theme":
+                    query = ThemePrefabQuery;
+                    break;
                 default:
-                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), 'tree', 'object' (all object prefabs incl. props and decals) or 'surface'");
+                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), 'tree', 'object' (all object prefabs incl. props and decals), 'surface', 'climate' or 'theme'");
             }
 
             request.Query.TryGetValue("query", out string search);

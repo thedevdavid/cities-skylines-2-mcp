@@ -28,6 +28,7 @@ namespace CS2MCP
             public string name;
             public ObjectOptionsDto options;
             public List<SurfaceDto> surfaces;
+            public bool? dryRun;
         }
 
         private const int kMaxSurfaceNodes = 2000;
@@ -160,7 +161,7 @@ namespace CS2MCP
                     problems = problems.Count > 200 ? problems.GetRange(0, 200) : problems,
                 }, 400);
             }
-            if (options.dryRun == true)
+            if (options.dryRun == true || body.dryRun == true)
             {
                 return BridgeResponse.Json(new
                 {

@@ -155,8 +155,20 @@ New, not yet run in the game: `POST /import/tmpe` (+ undo, status), MCP `cs2_imp
 Offline (`--write-only`): 27 nodes, 68 connections, 39 arrow lanes (37 superseded by connections, as in TM:PE), 0 direction inconsistencies, all lane ends resolved through `import-all.json` geometry.
 
 Verification (playset: CS2MCP, Traffic 0.2.13, the dktflls map with the imported network):
-1. `cs2_ping` shows `0.9.11-editor-import`.
+1. `cs2_ping` shows `0.9.12-editor-import`.
 2. `node scripts/import-tmpe.mjs --dry-run`. Expect 27 nodes matched; read `out/tmpe-import-report.md` for skipped connections (lane-count mismatches) and `offsetDelta`/`rankAgrees` per lane.
 3. `node scripts/import-tmpe.mjs`. Open Traffic's Lane Connector on 2–3 listed junctions (e.g. CS1 node 11611 near -6461,1078; 9988 near -6198,627): the custom connections should show, and lanes without custom connections keep defaults.
 4. Save the map, return to the menu, reload, check the same junctions again (Traffic's loader validates the data and would reset invalid nodes; `Traffic.log` says so).
 5. Undo test (optional, before saving): `--undo`, junctions back to defaults.
+
+## Round 12 (0.9.12): findings from run A
+
+- **Walls:** 23 of the 113 edges in `imp-20261019-135208-6` failed. All 23 are `QuaySmall01` running 1–7 m beside a highway; only 6 carry `wall`, and 15 other wall edges built fine. The game drops a net course that lies inside another net's footprint (probe: e1588_0 as given failed, and the same edge moved 8 m away built; undone afterwards).
+  - Re-imports:
+    - `walls-retry-shifted` (`imp-20261019-140336-9`): each edge moved clear of its highway by half-widths + 1 m, with its own node copies. 11 of 23 built.
+    - `walls-retry-shifted-2` (`imp-20261019-140351-10`): the remaining 12 moved another 3 m. 3 built.
+  - The last 9 sit between parallel carriageways in interchanges (moving away from one highway reaches the next) and cannot be nets in CS2.
+  - The shifted walls are separate pieces, offset 3–11 m from the CS1 line and not joined to their neighbours. Both imports can be undone by id.
+- **Bridge:** such failures now say "dropped by the game … runs inside the existing '<prefab>' segment …".
+- **Climates:** `/prefabs?category=climate|theme`, and the settings error lists the names (after a game restart).
+- **Dry run:** top-level `dryRun` (MCP parameter and request body).

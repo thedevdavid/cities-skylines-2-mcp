@@ -1342,8 +1342,9 @@ namespace CS2MCP
                 if (covered < kCourseSamples.Length)
                 {
                     edge.Status = "failed";
-                    edge.Error = $"the batch was applied but only {covered} of {kCourseSamples.Length} points along the course " +
-                        "lie on a segment of this prefab";
+                    edge.Error = DescribeOverlap(edge, course)
+                        ?? $"the batch was applied but only {covered} of {kCourseSamples.Length} points along the course " +
+                           "lie on a segment of this prefab";
                     edge.Segments.Clear();
                     continue;
                 }
@@ -1368,6 +1369,56 @@ namespace CS2MCP
         }
 
         private static readonly float[] kCourseSamples = { 0.2f, 0.5f, 0.8f };
+
+        /// <summary>
+        /// Why an applied course left no segment: if it runs inside one existing
+        /// segment's footprint (every sample closer to that segment's centre line than
+        /// the two half-widths), the game discards it without a validation error,
+        /// even with ignoreErrors (seen live with retaining-wall quays beside highways).
+        /// </summary>
+        private string DescribeOverlap(ImportEdge edge, Bezier4x2 course)
+        {
+            float ownHalf = HalfWidth(edge.Prefab);
+            Entity bestSegment = Entity.Null;
+            float bestWorst = float.MaxValue;
+            float bestNeed = 0f;
+            using (NativeArray<Entity> edges = m_EdgeQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity candidate in edges)
+                {
+                    Entity prefab = EntityManager.GetComponentData<PrefabRef>(candidate).m_Prefab;
+                    if (prefab == edge.Prefab)
+                    {
+                        continue;
+                    }
+                    Bezier4x2 curve = EntityManager.GetComponentData<Curve>(candidate).m_Bezier.xz;
+                    float need = HalfWidth(prefab) + ownHalf;
+                    if (!InBounds(curve, MathUtils.Position(course, 0.5f), need))
+                    {
+                        continue;
+                    }
+                    float worst = 0f;
+                    foreach (float t in kCourseSamples)
+                    {
+                        worst = math.max(worst, MathUtils.Distance(curve, MathUtils.Position(course, t), out _));
+                    }
+                    if (worst < need && worst < bestWorst)
+                    {
+                        bestWorst = worst;
+                        bestSegment = candidate;
+                        bestNeed = need;
+                    }
+                }
+            }
+            if (bestSegment == Entity.Null)
+            {
+                return null;
+            }
+            string name = PrefabName(EntityManager.GetComponentData<PrefabRef>(bestSegment).m_Prefab);
+            return $"dropped by the game: the course runs inside the existing '{name}' segment {bestSegment.Index}:{bestSegment.Version} " +
+                $"(centre lines up to {bestWorst:F1} m apart, the two half-widths need {bestNeed:F1} m); " +
+                $"move it at least {bestNeed - bestWorst + 0.5f:F1} m sideways, or leave it out";
+        }
 
         private static bool SameEnds(Bezier4x2 segment, Bezier4x2 course)
         {
