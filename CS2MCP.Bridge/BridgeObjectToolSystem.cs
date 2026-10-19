@@ -42,6 +42,8 @@ namespace CS2MCP
             public AgeMask Age;
             /// <summary>Net node an outside connection is attached to (CoursePos-like parent of the object).</summary>
             public Entity AttachTo;
+            /// <summary>Surface (area) polygon in world x/z; Position holds its centroid. Null for objects.</summary>
+            public float2[] Polygon;
             public string Status = "pending";
             public string Error;
             public Entity Entity;
@@ -117,6 +119,7 @@ namespace CS2MCP
 
         private CityConfigurationSystem m_CityConfigurationSystem;
         private EntityQuery m_TempObjectQuery;
+        private EntityQuery m_TempAreaQuery;
         private EntityQuery m_IconQuery;
 
         public override string toolID => "CS2MCP.Objects";
@@ -135,6 +138,16 @@ namespace CS2MCP
                     ComponentType.ReadOnly<Game.Objects.Object>(),
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Transform>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            m_TempAreaQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<Temp>(),
                 },
                 None = new[] { ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Deleted>() },
             });
@@ -254,7 +267,8 @@ namespace CS2MCP
             m_DeleteEntities = new List<Entity>();
             foreach (Entity entity in target.Entities)
             {
-                if (EntityManager.Exists(entity) && EntityManager.HasComponent<Transform>(entity) && !EntityManager.HasComponent<Deleted>(entity))
+                if (EntityManager.Exists(entity) && !EntityManager.HasComponent<Deleted>(entity)
+                    && (EntityManager.HasComponent<Transform>(entity) || EntityManager.HasBuffer<Game.Areas.Node>(entity)))
                 {
                     m_DeleteEntities.Add(entity);
                 }
@@ -399,6 +413,11 @@ namespace CS2MCP
                 foreach (int index in m_Current.Indices)
                 {
                     ImportObject obj = m_Job.Objects[index];
+                    if (obj.Polygon != null)
+                    {
+                        DefineArea(obj, definitions.m_CommandBuffer);
+                        continue;
+                    }
                     definitions.m_ObjectPrefab = obj.Prefab;
                     definitions.m_AgeMask = obj.Age;
                     definitions.m_RandomSeed = RandomSeed.Next();
@@ -484,11 +503,41 @@ namespace CS2MCP
             return definitions;
         }
 
-        /// <summary>Bulldoze definition for a top-level object, as BulldozeToolSystem.AddEntity.</summary>
+        /// <summary>
+        /// Area definition for a surface, as AreaToolSystem creates (and as the bridge's
+        /// district tool does): CreationDefinition + node buffer; elevation
+        /// float.MinValue lets the game drape each node on the terrain.
+        /// </summary>
+        private void DefineArea(ImportObject obj, EntityCommandBuffer commandBuffer)
+        {
+            Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
+            Entity e = commandBuffer.CreateEntity();
+            commandBuffer.AddComponent(e, new CreationDefinition { m_Prefab = obj.Prefab, m_RandomSeed = random.NextInt() });
+            commandBuffer.AddComponent(e, default(Updated));
+            DynamicBuffer<Game.Areas.Node> nodes = commandBuffer.AddBuffer<Game.Areas.Node>(e);
+            foreach (float2 point in obj.Polygon)
+            {
+                nodes.Add(new Game.Areas.Node(new float3(point.x, 0f, point.y), float.MinValue));
+            }
+        }
+
+        /// <summary>Bulldoze definition for a top-level object or area, as BulldozeToolSystem.AddEntity.</summary>
         private void DefineDelete(Entity target, EntityCommandBuffer commandBuffer)
         {
             if (!EntityManager.Exists(target) || EntityManager.HasComponent<Deleted>(target))
             {
+                return;
+            }
+            if (!EntityManager.HasComponent<Transform>(target))
+            {
+                if (EntityManager.HasBuffer<Game.Areas.Node>(target))
+                {
+                    Entity area = commandBuffer.CreateEntity();
+                    commandBuffer.AddComponent(area, new CreationDefinition { m_Original = target, m_Flags = CreationFlags.Delete });
+                    commandBuffer.AddComponent(area, default(Updated));
+                    DynamicBuffer<Game.Areas.Node> source = EntityManager.GetBuffer<Game.Areas.Node>(target, isReadOnly: true);
+                    commandBuffer.AddBuffer<Game.Areas.Node>(area).CopyFrom(source.AsNativeArray());
+                }
                 return;
             }
             Transform transform = EntityManager.GetComponentData<Transform>(target);
@@ -577,6 +626,35 @@ namespace CS2MCP
                         grid[key] = list;
                     }
                     list.Add((entity, xz));
+                }
+            }
+            // Surfaces: the Temp area matched by the centroid of its nodes.
+            using (NativeArray<Entity> areas = m_TempAreaQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity entity in areas)
+                {
+                    if (EntityManager.GetComponentData<Temp>(entity).m_Original != Entity.Null)
+                    {
+                        continue;
+                    }
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(entity, isReadOnly: true);
+                    if (nodes.Length == 0)
+                    {
+                        continue;
+                    }
+                    float2 centroid = float2.zero;
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        centroid += nodes[i].m_Position.xz;
+                    }
+                    centroid /= nodes.Length;
+                    long key = CellKey(centroid);
+                    if (!grid.TryGetValue(key, out var list))
+                    {
+                        list = new List<(Entity, float2)>();
+                        grid[key] = list;
+                    }
+                    list.Add((entity, centroid));
                 }
             }
             var claimed = new HashSet<Entity>();

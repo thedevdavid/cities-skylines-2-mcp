@@ -201,6 +201,8 @@ namespace CS2MCP
                     return UndoObjects(request);
                 case "/import/objects/status":
                     return ObjectsStatus();
+                case "/import/surfaces":
+                    return ImportSurfaces(request);
                 case "/import/resources":
                     return ImportResources(request);
                 case "/map/resources":

@@ -1976,6 +1976,51 @@ server.registerTool(
 );
 
 server.registerTool(
+  "cs2_import_surfaces",
+  {
+    title: "Create surface areas from polygons",
+    description:
+      "Create surface areas (grass, sand, pavement, concrete, tiles...) from polygons in CS2 metres (map editor or " +
+      "city). Format in SURFACES.md: {name, options:{dryRun,batchSize,bypassValidation,report}, " +
+      "surfaces:[{id,prefab,polygon:[[x,z],...]}]}. No holes (CS2 areas have none). Undo with cs2_undo_objects " +
+      "and the import name.",
+    inputSchema: {
+      file: z.string().optional().describe("Path to the surfaces JSON file"),
+      name: z.string().optional().describe("Import name, also the undo key"),
+      options: z
+        .object({
+          dryRun: z.boolean().optional(),
+          batchSize: z.number().int().min(1).max(1000).optional(),
+          bypassValidation: z.boolean().optional(),
+          report: z.enum(["compact", "summary", "full"]).optional(),
+          settleFrames: z.number().int().min(1).max(30).optional(),
+        })
+        .optional(),
+      surfaces: z
+        .array(
+          z.object({
+            id: z.union([z.string(), z.number()]),
+            prefab: z.string(),
+            polygon: z.array(z.tuple([z.number(), z.number()])).min(3),
+          }),
+        )
+        .optional(),
+    },
+  },
+  async ({ file, name, options, surfaces }) => {
+    try {
+      const body = await readJsonBody(file, surfaces ? { surfaces } : undefined);
+      if (name !== undefined) body.name = name;
+      if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      const { ok, payload } = await bridgePost("/import/surfaces", body, IMPORT_TIMEOUT_MS);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "cs2_undo_objects",
   {
     title: "Undo an object import",
