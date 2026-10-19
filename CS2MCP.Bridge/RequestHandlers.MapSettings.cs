@@ -240,12 +240,12 @@ namespace CS2MCP
             if (body.latitude.HasValue)
             {
                 planet.latitude = math.clamp(body.latitude.Value, -90f, 90f);
-                applied.Add("latitude");
+                applied.Add("latitude (this session only: reset from the climate prefab on every load)");
             }
             if (body.longitude.HasValue)
             {
                 planet.longitude = math.clamp(body.longitude.Value, -180f, 180f);
-                applied.Add("longitude");
+                applied.Add("longitude (this session only: reset from the climate prefab on every load)");
             }
             if (body.seaLevel.HasValue)
             {

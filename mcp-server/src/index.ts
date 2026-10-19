@@ -2203,6 +2203,25 @@ server.registerTool(
 );
 
 server.registerTool(
+  "cs2_map_checklist",
+  {
+    title: "Map playability checklist",
+    description:
+      "The map editor's playability checklist with pass/fail and the reason: required (starting tiles, water in the " +
+      "starting area, road outside connection, map name), optional (train/air/electricity connections, oil, ore, " +
+      "forest, fertile land) and publishing extras (description, preview, thumbnail). Map editor only.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      return jsonResult(await bridgeJson("/map/checklist"));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "cs2_map_settings",
   {
     title: "Read or change map settings",

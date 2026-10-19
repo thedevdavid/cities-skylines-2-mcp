@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Theme | read/write (`theme`: prefab name, e.g. `European`, `North American`) | `CityConfigurationSystem.defaultTheme` | Map Settings → Theme |
 | Climate | read/write (`climate`: climate prefab name) | `ClimateSystem.currentClimate` | Climate Settings → Selected climate |
-| Latitude / longitude | read/write | `PlanetarySystem.latitude/longitude` | not a field: copied from the climate prefab whenever the climate panel changes, which overwrites a value set from code. Set the climate first, then lat/long, and do not touch the climate panel afterwards. |
+| Latitude / longitude | read/write, **this session only** | `PlanetarySystem.latitude/longitude` | Not map-specific. `PlanetarySystem` serialises them, but `ClimateSystem.PostDeserialize` overwrites them on every load with the current climate prefab's `m_Latitude`/`m_Longitude`. The climate panel does the same on every change. So a saved map always comes back with the climate's coordinates (seen live: 40.77 / 116.05). A map-specific sun position needs a climate prefab carrying those coordinates, or a mod that re-applies them after load; it is not a map setting. |
 | Sea level | read/write (0–2000) | `WaterSystem.SeaLevel` | Water Settings → Sea level (and "Apply sea level") |
 | Height scale | read/write (200–10000) | `TerrainSystem.SetTerrainProperties` | Terrain (Heightmaps) → Height scale |
 | Left-hand traffic, natural disasters | read/write | `CityConfigurationSystem` | no editor field (saved into the map; a player's own new-game options override them) |
@@ -23,3 +23,13 @@
 Saving is always by hand: the editor's Save Map dialog builds the map metadata (name, preview, playability checklist) at save time.
 
 Things the playability checklist (`MapRequirementSystem`) wants before a map can be published: a starting area, an inbound and an outbound road connection, and the other items listed under the editor's checklist.
+
+## Playability checklist (`GET /map/checklist`, MCP `cs2_map_checklist`)
+
+The same items as the Map Settings checklist, from `MapRequirementSystem` and `MapPanelSystem.MapIsPlayable`.
+
+- **Required:** starting tiles; water (surface or groundwater) in a starting tile; a road outside connection (any road node on the border); a map name (valid in the fallback language).
+- **Optional:** train, air and electricity connections; oil, ore, forest and fertile land anywhere on the map.
+- **Publishing extras:** description, preview, thumbnail.
+
+The response is `{playable, required:[{item, pass, detail}], optional:[…], publishing:[…]}`; `detail` says what is missing. The editor checks only that some road node lies on the border; it has no separate inbound/outbound check, so a two-way road connection satisfies it.

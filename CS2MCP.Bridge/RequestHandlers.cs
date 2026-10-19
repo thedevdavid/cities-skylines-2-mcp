@@ -207,6 +207,8 @@ namespace CS2MCP
                     return ImportResources(request);
                 case "/map/resources":
                     return ReadResources(request);
+                case "/map/checklist":
+                    return MapChecklist();
                 case "/map/settings":
                     return MapSettings(request);
                 case "/entity/subnets":
