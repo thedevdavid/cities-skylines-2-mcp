@@ -7,7 +7,7 @@ namespace CS2MCP
     public sealed class Mod : IMod
     {
         public const string Name = "CS2MCP";
-        public const string Version = "0.9.6-editor-import";
+        public const string Version = "0.9.7-editor-import";
 
         public static readonly ILog Log = LogManager.GetLogger(Name).SetShowsErrorsInUI(false);
 
@@ -21,6 +21,7 @@ namespace CS2MCP
             updateSystem.UpdateAt<BridgeMapTileRefreshSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<BridgeRoadToolSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<BridgeImportToolSystem>(SystemUpdatePhase.ToolUpdate);
+            updateSystem.UpdateAt<BridgeObjectToolSystem>(SystemUpdatePhase.ToolUpdate);
         }
 
         public void OnDispose()

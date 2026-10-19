@@ -1915,6 +1915,202 @@ server.registerTool(
   },
 );
 
+// ---- Objects, natural resources, map settings (round 7) ----
+
+async function readJsonBody(file: string | undefined, inline: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
+  if (file) return JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+  if (inline) return inline;
+  throw new Error("pass 'file' or the inline fields");
+}
+
+server.registerTool(
+  "cs2_import_objects",
+  {
+    title: "Place objects in batches",
+    description:
+      "Place trees, bushes, rocks, props, buildings and outside connections by prefab name (map editor or city), " +
+      "streamed through the game's tool pipeline in batches (default 500). Format in IMPORT_SCHEMA.md: " +
+      "{name, options:{dryRun,batchSize,bypassValidation,report}, objects:[{id,prefab,x,z,y?,rotation?,kind?,age?,net?}]}. " +
+      "Road/rail outside connections are not placed: they are reported as the border node the game made from a net " +
+      "ending at the map edge. Pass 'file' for large imports (up to 16 MB / ~50 000 objects). Undo with cs2_undo_objects.",
+    inputSchema: {
+      file: z.string().optional().describe("Path to the import JSON file (read by the MCP server)"),
+      name: z.string().optional().describe("Import name, also the undo key"),
+      options: z
+        .object({
+          dryRun: z.boolean().optional(),
+          batchSize: z.number().int().min(1).max(5000).optional(),
+          bypassValidation: z.boolean().optional(),
+          report: z.enum(["compact", "summary", "full"]).optional(),
+          settleFrames: z.number().int().min(1).max(30).optional(),
+        })
+        .optional(),
+      objects: z
+        .array(
+          z.object({
+            id: z.union([z.string(), z.number()]),
+            prefab: z.string(),
+            x: z.number(),
+            z: z.number(),
+            y: z.number().optional(),
+            rotation: z.number().optional(),
+            kind: z.string().optional(),
+            age: z.enum(["seedling", "sapling", "adult", "elderly"]).optional(),
+            net: z.string().optional(),
+          }),
+        )
+        .optional(),
+    },
+  },
+  async ({ file, name, options, objects }) => {
+    try {
+      const body = await readJsonBody(file, objects ? { objects } : undefined);
+      if (name !== undefined) body.name = name;
+      if (options !== undefined) body.options = { ...(body.options as object | undefined), ...options };
+      const { ok, payload } = await bridgePost("/import/objects", body, IMPORT_TIMEOUT_MS);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_undo_objects",
+  {
+    title: "Undo an object import",
+    description:
+      "Bulldoze the objects placed by one cs2_import_objects run, chosen by its name or importId (default: the " +
+      "newest). Records live in game memory only.",
+    inputSchema: {
+      name: z.string().optional().describe("Import name (or importId)"),
+    },
+  },
+  async ({ name }) => {
+    const params = new URLSearchParams();
+    if (name) params.set("name", name);
+    try {
+      const { ok, payload } = await bridgePost(`/import/objects/undo?${bridgeQueryString(params)}`, undefined, IMPORT_TIMEOUT_MS);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_objects_status",
+  {
+    title: "Object import progress",
+    description: "Progress of the running cs2_import_objects or undo, the last report, and the undoable imports.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      return jsonResult(await bridgeJson("/import/objects/status"));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_import_resources",
+  {
+    title: "Write natural resources",
+    description:
+      "Write fertility, ore, oil, fish and groundwater from regular grids of 0-255 values in CS2 metres onto the " +
+      "game's 256x256 resource maps (map editor or city). Body: {name, options:{dryRun,mode:replace|max|add,scale:{layer:max}}, " +
+      "grid:{size,cellSize,originX,originZ,rowAxis}, layers:{fertility:[...],ore:[...],oil:[...],fish:[...],groundwater:[...]}}. " +
+      "'forest' is ignored (wood comes from trees); fish is recomputed from water by the game. Pass 'file' for real data.",
+    inputSchema: {
+      file: z.string().optional().describe("Path to the resources JSON file"),
+      dryRun: z.boolean().optional(),
+      mode: z.enum(["replace", "max", "add"]).optional(),
+    },
+  },
+  async ({ file, dryRun, mode }) => {
+    try {
+      const body = await readJsonBody(file, undefined);
+      const options = { ...(body.options as Record<string, unknown> | undefined) };
+      if (dryRun !== undefined) options.dryRun = dryRun;
+      if (mode !== undefined) options.mode = mode;
+      body.options = options;
+      const { ok, payload } = await bridgePost("/import/resources", body, 120_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_map_resources",
+  {
+    title: "Read a natural-resource layer",
+    description:
+      "Read one resource layer back as a downsampled row-major grid over the playable area (origin -7168,-7168, " +
+      "row 0 at the south edge, rows going +z), in game units (10000 = full).",
+    inputSchema: {
+      layer: z.enum(["fertility", "ore", "oil", "fish", "groundwater"]),
+      size: z.number().int().min(8).max(256).optional().describe("Output grid size (default 128)"),
+      field: z.enum(["base", "used", "available", "max"]).optional().describe("base (default), used, available; groundwater: amount or max"),
+    },
+  },
+  async ({ layer, size, field }) => {
+    const params = new URLSearchParams({ layer });
+    if (size) params.set("size", String(size));
+    if (field) params.set("field", field);
+    try {
+      return jsonResult(await bridgeJson(`/map/resources?${bridgeQueryString(params)}`, 30_000));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_map_settings",
+  {
+    title: "Read or change map settings",
+    description:
+      "Read the map settings (theme, climate, latitude/longitude, sea level, height scale, traffic side, starting " +
+      "date, camera start, starting tile count), or change them by passing 'set'. Name, description, preview, " +
+      "thumbnail and starting tiles are set by hand in the editor (MAP_SETTINGS.md).",
+    inputSchema: {
+      set: z
+        .object({
+          theme: z.string().optional(),
+          climate: z.string().optional(),
+          latitude: z.number().optional(),
+          longitude: z.number().optional(),
+          seaLevel: z.number().optional(),
+          heightScale: z.number().optional(),
+          leftHandTraffic: z.boolean().optional(),
+          naturalDisasters: z.boolean().optional(),
+          startingYear: z.number().int().optional(),
+          startingMonth: z.number().int().min(1).max(12).optional(),
+          startingTime: z.number().min(0).max(1).optional(),
+          currentYearAsStartingYear: z.boolean().optional(),
+          mapNameAsCityName: z.boolean().optional(),
+          cameraPivot: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
+          cameraAngle: z.tuple([z.number(), z.number()]).optional(),
+          cameraZoom: z.number().optional(),
+        })
+        .optional(),
+    },
+  },
+  async ({ set }) => {
+    try {
+      if (!set) return jsonResult(await bridgeJson("/map/settings"));
+      const { ok, payload } = await bridgePost("/map/settings", set, 30_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error(`cs2-mcp 0.8.0 running on stdio (bridge: ${BRIDGE_URL})`);

@@ -50,7 +50,8 @@ namespace CS2MCP
         public BridgeResponse Handle(BridgeRequest request)
         {
             if (request.Path.StartsWith("/build/", StringComparison.Ordinal)
-                && World.GetOrCreateSystemManaged<BridgeImportToolSystem>().IsBusy)
+                && (World.GetOrCreateSystemManaged<BridgeImportToolSystem>().IsBusy
+                    || World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().IsBusy))
             {
                 return BridgeResponse.Error(409, "a network import is running; wait for it (GET /import/status) and retry");
             }
@@ -194,6 +195,18 @@ namespace CS2MCP
                     return ImportWater(request);
                 case "/import/water/undo":
                     return UndoWater(request);
+                case "/import/objects":
+                    return ImportObjects(request);
+                case "/import/objects/undo":
+                    return UndoObjects(request);
+                case "/import/objects/status":
+                    return ObjectsStatus();
+                case "/import/resources":
+                    return ImportResources(request);
+                case "/map/resources":
+                    return ReadResources(request);
+                case "/map/settings":
+                    return MapSettings(request);
                 case "/graph/export":
                     return ExportGraph(request);
                 case "/import/undo":

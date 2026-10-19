@@ -168,3 +168,89 @@ How `m_Height` is filled depends on `WaterSystem.UseLegacyWaterSources` (reporte
 ```
 
 `elevation` is omitted when both ends are on the ground, `curve` unless `curves=true`. `degree` counts every segment at the node, including ones the prefab filter left out.
+
+## Objects (`POST /import/objects`)
+
+MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/objects/undo[?name=<name>|?id=<importId>]` / `cs2_undo_objects`, progress `GET /import/objects/status` / `cs2_objects_status`. Map editor or city.
+
+```json
+{ "name": "trees-01",
+  "options": { "dryRun": false, "batchSize": 500, "bypassValidation": true, "report": "compact", "settleFrames": 1 },
+  "objects": [
+    { "id": "t1", "prefab": "TreeWildRandom01", "x": 0, "z": 0, "kind": "tree", "age": "adult" },
+    { "id": "b1", "prefab": "<building prefab>", "x": 0, "z": 0, "y": 212.5, "rotation": 90, "kind": "building" },
+    { "id": "oc1", "prefab": "Road Outside Connection - Twoway", "x": 7168, "z": 2744, "kind": "outsideConnection", "net": "road" },
+    { "id": "air1", "prefab": "Airplane Outside Connection", "x": 7100, "z": -3000, "kind": "outsideConnection", "net": "air" } ] }
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique within the request. |
+| `prefab` | Exact object prefab name, case-insensitive (`PREFAB_NAMES.md`; trees, bushes, rocks, props, buildings, markers). Every distinct name is resolved once; unknown names reject the request (400) with counts per name. |
+| `x`, `z` | CS2 metres as in `/import/network`; must lie within ±7168 (+1 m). |
+| `y` | Optional absolute height. Omitted: the terrain surface at x,z. Above the terrain it becomes the object's elevation. |
+| `rotation` | Yaw in degrees, `quaternion.RotateY(radians)` = Unity `Quaternion.Euler(0, rotation, 0)`: 0 = prefab forward along +z, positive turns clockwise seen from above (90 = facing +x). To be confirmed in-game with an asymmetric building. |
+| `kind` | Hint only; the bridge classifies by prefab components (`tree`, `plant`, `building`, `outsideConnection`, `object`) and reports mismatches as warnings. |
+| `age` | Trees and bushes: `seedling` (AgeMask.Sapling), `sapling` (young/teen, AgeMask.Young), `adult` (default, AgeMask.Mature), `elderly` (AgeMask.Elderly). |
+| `net` | Outside connections: `road` or `rail` (see below); anything else (e.g. `air`, `ship`) places the prefab as a free border object. |
+
+Placement: each object becomes one definition from the bridge's port of the game's LineTool/ObjectTool definition job (`CreateDefinitions`), so buildings get their sub-objects, lots and terraforming, placeholder prefabs (`…Random01`) pick a variant, and trees get their age. Batches go through `ToolOutputBarrier` with the network importer's handshake (Clear → None → Apply, bisection on rejection). New objects are matched to ids by position among the batch's Temp objects (the game turns the Temp entity into the permanent one), so there are no full-map scans. `bypassValidation` sets `ToolSystem.ignoreErrors` for the import.
+
+Outside connections: **road and rail** connections are not objects you place. The game tags a net node on the terrain border with `Game.Net.OutsideConnection` and spawns the marker on it. For `kind: outsideConnection, net: road|rail` the bridge finds the nearest road (or train-track) node within 20 m of x,z. It reports `created` with the node entity if the game has made it an outside connection, or `failed` saying the net must end on the border; nothing is placed. **Airplane** (and, unverified, ship) connections are free objects: the bridge moves them onto the nearest terrain edge and, without `rotation`, faces them outward (+x edge 90°, -x 270°, +z 0°, -z 180°), as the editor's object tool does (`ObjectToolSystem.HandleWorldSize`). The game rejects them off the border (`NotOnBorder`).
+
+Response (compact; `report: "full"` adds `results`, one entry per object):
+
+```json
+{ "importId": "obj-20261019-101500-1", "name": "trees-01", "completed": true, "abortReason": null,
+  "objects": { "requested": 50000, "created": 49980, "failed": 20, "notRun": 0 },
+  "byPrefab": { "TreeWildRandom01": { "created": 49980, "failed": 20 } },
+  "batches": { "applied": 100, "rejected": 0 }, "frames": 520, "seconds": 18.2,
+  "validation": { "bypassValidation": true, "ignoreErrors": false, "anarchyDetected": true, "anarchyEnabled": false },
+  "undo": { "objectsRecorded": 49980, "note": "..." },
+  "warningCount": 0, "warnings": [],
+  "failedObjects": [{ "id": "t17", "prefab": "TreeWildRandom01", "error": "blocked by game validation (InWater)" }],
+  "outsideConnections": [{ "id": "oc1", "status": "created", "node": "5101:1", "entity": "5101:1" }],
+  "results": null }
+```
+
+Full `results` entries: `{id, status (created|failed|pending), error, prefab, kind, entity, attachedTo}`. Dry run answers `{dryRun, valid, mode, objects, prefabsResolved, perKind, batchSize, warningCount, warnings, outsideConnections}`; road/rail connections are resolved in the dry run too. Requests up to 16 MB (about 50 000 objects per file).
+
+## Natural resources (`POST /import/resources`, `GET /map/resources`)
+
+MCP `cs2_import_resources` (file) and `cs2_map_resources`.
+
+```json
+{ "name": "resources", "options": { "dryRun": false, "mode": "replace", "scale": { "ore": 10000 } },
+  "grid": { "size": 512, "cellSize": 33.75, "originX": -8640, "originZ": -8640, "rowAxis": "+z" },
+  "layers": { "fertility": [ ...size*size ints 0-255... ], "ore": [...], "oil": [...], "groundwater": [...], "forest": [...] } }
+```
+
+- **Grid:** values are at cell centres, row-major, columns going +x from `originX`.
+  - `rowAxis: "+z"`: row 0 at `originZ`, rows going +z.
+  - `rowAxis: "-z"`: row 0 at `originZ`, rows going -z.
+- **Game grid:** each game layer is 256×256 cells of 56 m over the playable area, origin -7168,-7168, row 0 at the south edge.
+  - The bridge samples the input bilinearly at each game cell centre (0 outside the input grid) and writes `round(v/255 × scale)`.
+- **`scale`:** defaults to 10000 per layer. That is the editor brush maximum and full concentration for extractors (`NaturalResourceSystem.MAX_BASE_RESOURCES`, `GroundWaterSystem.kMaxGroundWater`).
+- **`mode`:** `replace` (default), `max` or `add`; `m_Used` is reset to 0.
+- **Layers in CS2:**
+  - `fertility`, `ore` and `oil` are written as given.
+  - `groundwater` sets amount and max, as the editor does.
+  - `fish` is accepted, but the game recomputes it from surface-water depth every update, so shape fish with water.
+  - `forest` is ignored (reported under `ignored`): wood comes from tree entities.
+- **After writing:** the bridge marks map features `Updated`, as the editor's own resource import does.
+- **Response:** `{name, dryRun, mode, writeMode, gameGrid:{size,cellSize,originX,originZ,rowAxis}, layers:[{layer,scale,cellsWritten,cellsNonZero,mean,max,note}], ignored:[{layer,reason}], note}`.
+
+**Read-back:** `GET /map/resources?layer=fertility|ore|oil|fish|groundwater&size=8..256&field=base|used|available|max`.
+- `size` defaults to 128 and `field` to `base`; `max` applies to groundwater.
+- Returns `{layer, field, size, cellSize, originX: -7168, originZ: -7168, rowAxis: "+z", max, note, values:[size*size]}` in game units.
+
+## Map settings (`GET` / `POST /map/settings`)
+
+MCP `cs2_map_settings` (pass `set` to write). See `MAP_SETTINGS.md` for each field and the editor panel that owns it.
+
+POST body, all fields optional:
+`{theme, climate, latitude, longitude, seaLevel, heightScale, leftHandTraffic, naturalDisasters, startingYear, startingMonth (1-12), startingTime (0-1), currentYearAsStartingYear, mapNameAsCityName, cameraPivot:{x,y,z}, cameraAngle:[x,y], cameraZoom}`
+
+Response (GET and POST): `{mode, applied:[names], problems:[...], settings:{...}, notWritable:[...], note}`.
+- `settings` holds: `mapName, theme, climate, latitude, longitude, seaLevel, waterSystem, heightScale, heightOffset, leftHandTraffic, naturalDisasters, unlockAll, unlimitedMoney, unlockMapTiles, time:{startingYear,startingMonth,startingTime}, mapPanel:{...}, camera:{pivot,angle,zoom}, startingTiles`.
+- Name, description, preview, thumbnail and starting tiles are set by hand in the editor.
