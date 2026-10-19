@@ -90,3 +90,26 @@ The lane/marker names (`High-voltage Cable Lane`, `Low-voltage Marker`, …) are
 - **How custom assets are found:** packs loaded in the playset register with the same `PrefabSystem` as vanilla ones, so `/import/objects` resolves their names the same way. `GET /prefabs?category=object&query=…&limit=1000&offset=…` (MCP `cs2_find_prefabs`, category `object`) lists every object prefab: props, decals, rocks, bushes, markers, trees and buildings, custom ones included. Use it to check the converter's names against the live list. To be confirmed at game time (NOTES.md).
 - **Decals:** CS2 has no separate decal prefab kind. A decal is an ordinary static object prefab whose mesh (`RenderPrefab`) carries `DecalProperties` and is projected onto the surface below. `/import/objects` places it through the same object definition path as any prop. Leave `y` empty (terrain surface) and use `rotation` for the yaw.
 - **Surfaces:** list them with `GET /prefabs?category=surface`.
+
+## Walls and fences
+
+Checked against the localisation keys (names exist). The **dimensions are not in `Game.dll`**: they live in the compressed asset bundles, so they can only be read from the running game. From bridge 0.9.17 on, `GET /prefabs/info?name=<prefab>` also answers for object prefabs, with `geometry.size` {x, y, z} in metres; a wall's length is the longer of x and z. Measure all of them in one go once the game is up:
+
+```bash
+for p in EU_Wall01 EU_Wall01Long EU_Wall01Short EU_Wall01ExtraShort EU_Wall03 EU_Wall03Long EU_Wall03Short EU_Wall03ExtraShort EU_WallLow01 RuinsCastle01 OldCastle01; do curl -s "http://127.0.0.1:8642/prefabs/info?name=$p" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);console.log(j.name||j.error,JSON.stringify(j.geometry&&j.geometry.size))})'; done
+```
+
+| Family | Variants (all exist) | Notes |
+|---|---|---|
+| `EU_Wall01` … `EU_Wall09` | base, `Long`, `Short`, `ExtraShort` (e.g. `EU_Wall03Short`) | European garden and boundary walls in 9 styles. The converter's `EU_Wall01`, `EU_Wall03`, `EU_Wall01Short`, `EU_Wall01ExtraShort` and `EU_Wall03Short` all exist. |
+| `EU_WallLow01` … `EU_WallLow09` | base, `Long`, `Short`, `ExtraShort` | low versions |
+| `EU_WallRandom01`, `EU_WallLongRandom01`, `EU_WallShortRandom01`, `EU_WallExtraShortRandom01`, and the `EU_WallLow…Random01` set | placeholders | random style per piece |
+| `EU_FenceResidential{High,Low}01–06`, `…PieceHigh/Low…`, `…Short…` | | European residential fences |
+| `NA_FenceResidential{High,Low}01–05` and pieces | | North American fences |
+| `FenceIndustrial{High,Low}01–02` and pieces | | industrial fences |
+| `PergolaModularWall01–07` (and `L`/`R`) | | pergola walls |
+
+**Castle and stone-fort candidates:** CS2 has no vanilla stone fort-wall prop; there is no "stone wall", "rampart" or "battlement" piece.
+- **Closest whole-asset options:** `RuinsCastle01` (castle ruin), `OldCastle01`, and the landmark building `ServiceBuildingMedievalCastle`. `MedievalCastleMasterSpots` and `MedievalCastleSpotShow01–03` are effect/marker objects, not walls.
+- **Natural stone accents along a line:** `StandingStone01–08`, `RuinsStoneFormation01–02` and `RuinsStoneCairns01–03`.
+- **Keeping a continuous wall:** use the stoniest `EU_Wall` style (pick visually in game; styles 01–09 differ in material), or a PDX Mods wall pack from the playset (list with `cs2_find_prefabs` category `object`, query `Wall`).

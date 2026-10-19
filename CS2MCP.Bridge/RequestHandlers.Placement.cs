@@ -28,9 +28,10 @@ namespace CS2MCP
                 return BridgeResponse.Error(400, "provide ?name=<prefab name>");
             }
             if (!TryFindPrefabByName(BuildingPrefabQuery, name, out Entity prefabEntity, out PrefabBase prefab)
-                && !TryFindPrefabByName(NetPrefabQuery, name, out prefabEntity, out prefab))
+                && !TryFindPrefabByName(NetPrefabQuery, name, out prefabEntity, out prefab)
+                && !TryFindPrefabByName(ObjectPrefabQuery, name, out prefabEntity, out prefab))
             {
-                return BridgeResponse.Error(404, $"no building or network prefab named '{name}'");
+                return BridgeResponse.Error(404, $"no building, network or object prefab named '{name}'");
             }
             object building = null;
             if (EntityManager.HasComponent<BuildingData>(prefabEntity))
