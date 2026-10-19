@@ -190,6 +190,12 @@ namespace CS2MCP
                     return ImportStatus();
                 case "/import/report":
                     return ImportReport(request);
+                case "/import/water":
+                    return ImportWater(request);
+                case "/import/water/undo":
+                    return UndoWater(request);
+                case "/graph/export":
+                    return ExportGraph(request);
                 case "/import/undo":
                     return UndoImport(request);
                 default:

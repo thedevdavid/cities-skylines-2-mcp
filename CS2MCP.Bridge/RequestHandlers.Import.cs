@@ -24,8 +24,21 @@ namespace CS2MCP
             public int version;
         }
 
+        public sealed class ImportSnapDto
+        {
+            public float radius;
+            public string prefabContains;
+        }
+
+        public sealed class ImportAttachDto
+        {
+            public ImportSnapDto a;
+            public ImportSnapDto b;
+        }
+
         public sealed class ImportNodeDto
         {
+            public ImportSnapDto snapToSegment;
             public string id;
             public float x;
             public float? y;
@@ -42,6 +55,7 @@ namespace CS2MCP
             public string prefab;
             public float[][] control;
             public float[] elevation;
+            public ImportAttachDto attachTo;
         }
 
         public sealed class ImportOptionsDto
@@ -197,6 +211,11 @@ namespace CS2MCP
                         node.XZ = EntityManager.GetComponentData<Node>(entity).m_Position.xz;
                     }
                 }
+                node.OriginalXZ = node.XZ;
+                if (dto.snapToSegment != null && !ApplySnap(node, dto.snapToSegment, $"node '{dto.id}'", problems, job))
+                {
+                    continue;
+                }
                 nodeIndex[dto.id] = job.Nodes.Count;
                 job.Nodes.Add(node);
                 explicitElevation.Add(hasElevation);
@@ -243,6 +262,19 @@ namespace CS2MCP
                     for (int i = 0; i < control.Length; i++)
                     {
                         control[i] = new float2(dto.control[i][0], dto.control[i][2]);
+                    }
+                }
+                if (dto.attachTo != null)
+                {
+                    if (dto.attachTo.a != null && job.Nodes[a].SnapRadius <= 0f
+                        && !ApplySnap(job.Nodes[a], dto.attachTo.a, $"edge '{dto.id}' attachTo.a", problems, job))
+                    {
+                        continue;
+                    }
+                    if (dto.attachTo.b != null && job.Nodes[b].SnapRadius <= 0f
+                        && !ApplySnap(job.Nodes[b], dto.attachTo.b, $"edge '{dto.id}' attachTo.b", problems, job))
+                    {
+                        continue;
                     }
                 }
                 if (dto.elevation != null && dto.elevation.Length != 2)
@@ -338,6 +370,26 @@ namespace CS2MCP
             }
             // Completed by BridgeImportToolSystem when every batch has been applied or rejected.
             return null;
+        }
+
+        private const float kMaxSnapRadius = 100f;
+
+        private static bool ApplySnap(BridgeImportToolSystem.ImportNode node, ImportSnapDto snap, string what,
+            List<string> problems, BridgeImportToolSystem.ImportJob job)
+        {
+            if (!(snap.radius > 0f) || snap.radius > kMaxSnapRadius)
+            {
+                problems.Add($"{what}: snap radius must be > 0 and <= {kMaxSnapRadius} m");
+                return false;
+            }
+            if (node.Entity != Entity.Null)
+            {
+                job.Warnings.Add($"{what}: node '{node.Id}' already names an entity; snapping ignored");
+                return true;
+            }
+            node.SnapRadius = snap.radius;
+            node.SnapPrefabContains = snap.prefabContains;
+            return true;
         }
 
         private static void ApplyEdgeElevation(BridgeImportToolSystem.ImportJob job, List<bool> explicitElevation, int node, float elevation, string edgeId)

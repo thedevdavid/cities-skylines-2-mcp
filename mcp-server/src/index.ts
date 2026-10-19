@@ -1657,6 +1657,12 @@ async function bridgePost(path: string, body: unknown, timeoutMs: number): Promi
 }
 
 const importPoint = z.tuple([z.number(), z.number(), z.number()]);
+const importSnap = z
+  .object({
+    radius: z.number().positive().max(100).describe("Search radius in meters around the node's x/z"),
+    prefabContains: z.string().optional().describe("Only segments whose prefab name contains this"),
+  })
+  .describe("Attach to the nearest existing segment within radius by splitting it (else a free node)");
 
 server.registerTool(
   "cs2_import_network",
@@ -1681,6 +1687,7 @@ server.registerTool(
             z: z.number(),
             elevation: z.number().optional(),
             entity: z.object({ index: z.number().int(), version: z.number().int() }).optional(),
+            snapToSegment: importSnap.optional(),
           }),
         )
         .optional(),
@@ -1693,6 +1700,7 @@ server.registerTool(
             prefab: z.string(),
             control: z.array(importPoint).min(1).max(2).optional(),
             elevation: z.tuple([z.number(), z.number()]).optional(),
+            attachTo: z.object({ a: importSnap.optional(), b: importSnap.optional() }).optional(),
           }),
         )
         .optional(),
@@ -1796,6 +1804,107 @@ server.registerTool(
     try {
       const { ok, payload } = await bridgePost(`/import/undo?${bridgeQueryString(params)}`, undefined, IMPORT_TIMEOUT_MS);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_import_water",
+  {
+    title: "Create water sources",
+    description:
+      "Create water sources in one call (map editor or city), as Water Features does. Types: natural (constant " +
+      "level, lake-style), stream, river, sea (sea only with the legacy water system). Give the water level as " +
+      "'height' (absolute, meters) or 'depth' (above the terrain at the source); legacy streams take 'rate'. " +
+      "Pass 'file' (JSON with {sources}) or 'sources' inline. Returns an importId for cs2_undo_water.",
+    inputSchema: {
+      file: z.string().optional().describe("Path to a JSON file with {sources:[...]}"),
+      name: z.string().optional(),
+      dryRun: z.boolean().optional().describe("Validate and compute values only"),
+      sources: z
+        .array(
+          z.object({
+            id: z.union([z.string(), z.number()]),
+            x: z.number(),
+            z: z.number(),
+            type: z.enum(["natural", "lake", "stream", "river", "sea"]),
+            height: z.number().optional().describe("Absolute water level in meters"),
+            depth: z.number().optional().describe("Water depth above the terrain at the source"),
+            rate: z.number().optional().describe("Flow rate (legacy stream sources)"),
+            radius: z.number().positive().max(2500),
+            polluted: z.number().min(0).max(1).optional(),
+          }),
+        )
+        .optional(),
+    },
+  },
+  async ({ file, name, dryRun, sources }) => {
+    try {
+      let body: Record<string, unknown>;
+      if (file) {
+        body = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      } else if (sources) {
+        body = { sources };
+      } else {
+        return errorResult(new Error("pass 'file' or 'sources'"));
+      }
+      if (name !== undefined) body.name = name;
+      if (dryRun !== undefined) body.dryRun = dryRun;
+      const { ok, payload } = await bridgePost("/import/water", body, 60_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_undo_water",
+  {
+    title: "Undo the last water import",
+    description:
+      "Delete the water sources created by the most recent cs2_import_water (newest first; in game memory only, " +
+      "lost on game restart).",
+    inputSchema: {
+      importId: z.string().optional().describe("Must equal the newest water importId, as a safety check"),
+    },
+  },
+  async ({ importId }) => {
+    const params = new URLSearchParams();
+    if (importId) params.set("id", importId);
+    try {
+      const { ok, payload } = await bridgePost(`/import/water/undo?${bridgeQueryString(params)}`, undefined, 60_000);
+      return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_graph_export",
+  {
+    title: "Export the whole network graph to a file",
+    description:
+      "Write every network segment (id, prefab, start/end node ids, length, elevation, optional Bezier curve) and " +
+      "node (id, x, y, z, degree) of the map to a JSON file, optionally filtered by prefab substring. Returns only " +
+      "the path and counts, so large maps never pass through the chat. Works in the map editor and in a city.",
+    inputSchema: {
+      path: z.string().describe("Absolute output path for the JSON file (written by the game process)"),
+      prefab: z.string().optional().describe("Only segments whose prefab name contains this"),
+      includeOwned: z.boolean().optional().describe("Also include segments owned by buildings (station tracks, ...)"),
+      curves: z.boolean().optional().describe("Include the four Bezier control points per segment"),
+    },
+  },
+  async ({ path, prefab, includeOwned, curves }) => {
+    const params = new URLSearchParams({ path });
+    if (prefab) params.set("prefab", prefab);
+    if (includeOwned) params.set("owned", "true");
+    if (curves) params.set("curves", "true");
+    try {
+      return jsonResult(await bridgeJson(`/graph/export?${bridgeQueryString(params)}`, 120_000));
     } catch (err) {
       return errorResult(err);
     }

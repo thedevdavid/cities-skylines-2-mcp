@@ -53,6 +53,14 @@ namespace CS2MCP
             public float2 Direction;
             /// <summary>No node exists here any more: the game merged the two collinear segments meeting here into one.</summary>
             public bool Absorbed;
+            /// <summary>snapToSegment: attach to the nearest existing segment within this radius (0 = off).</summary>
+            public float SnapRadius;
+            public string SnapPrefabContains;
+            public float2 OriginalXZ;
+            public bool SnapTried;
+            public Entity SnapSegment;
+            public float SnapT;
+            public float SnapDistance;
             public string Error;
         }
 
@@ -144,6 +152,11 @@ namespace CS2MCP
 
         private readonly List<ImportRecord> m_Records = new List<ImportRecord>();
         private readonly HashSet<Entity> m_RecordEdgeSet = new HashSet<Entity>();
+        // Segments split and nodes placed by a split in the current batch: a second
+        // split of the same segment, or another edge at that node, waits for the next batch.
+        private readonly HashSet<Entity> m_BatchSplitSegments = new HashSet<Entity>();
+        private readonly HashSet<ImportNode> m_BatchSplitNodes = new HashSet<ImportNode>();
+        private readonly Dictionary<Entity, string> m_PrefabNames = new Dictionary<Entity, string>();
         private readonly Dictionary<Entity, float> m_HalfWidths = new Dictionary<Entity, float>();
         private object m_LastReport;
 
@@ -256,18 +269,23 @@ namespace CS2MCP
                 var pending = new List<int>();
                 for (int i = 0; i < job.Nodes.Count; i++)
                 {
-                    if (job.Nodes[i].Entity == Entity.Null && job.Nodes[i].CreatePrefab != Entity.Null)
+                    // Nodes that snap to a segment are placed by the split, not as standalone nodes.
+                    if (job.Nodes[i].Entity == Entity.Null && job.Nodes[i].CreatePrefab != Entity.Null && job.Nodes[i].SnapRadius <= 0f)
                     {
                         pending.Add(i);
                     }
                 }
                 EnqueueChunks(ItemKind.Nodes, pending, job.BatchSize);
             }
+            // Edges with a snapping end go last, so the segments they snap to exist by then.
             var edges = new List<int>();
+            var snapping = new List<int>();
             for (int i = 0; i < job.Edges.Count; i++)
             {
-                edges.Add(i);
+                ImportEdge edge = job.Edges[i];
+                (job.Nodes[edge.A].SnapRadius > 0f || job.Nodes[edge.B].SnapRadius > 0f ? snapping : edges).Add(i);
             }
+            edges.AddRange(snapping);
             EnqueueChunks(ItemKind.Edges, edges, job.BatchSize);
 
             m_PendingRequest = request;
@@ -441,16 +459,28 @@ namespace CS2MCP
                         }
                         break;
                     case ItemKind.Edges:
+                        m_BatchSplitSegments.Clear();
+                        m_BatchSplitNodes.Clear();
                         var kept = new List<int>();
+                        var deferred = new List<int>();
                         foreach (int index in m_Current.Indices)
                         {
-                            if (DefineEdge(m_Job.Edges[index], commandBuffer, ref heightData))
+                            switch (DefineEdge(m_Job.Edges[index], commandBuffer, ref heightData))
                             {
-                                kept.Add(index);
-                                m_CurrentDefined++;
+                                case EdgeDefinition.Defined:
+                                    kept.Add(index);
+                                    m_CurrentDefined++;
+                                    break;
+                                case EdgeDefinition.Deferred:
+                                    deferred.Add(index);
+                                    break;
                             }
                         }
                         m_Current.Indices = kept;
+                        if (deferred.Count > 0)
+                        {
+                            m_Queue.Insert(0, new WorkItem { Kind = ItemKind.Edges, Indices = deferred });
+                        }
                         break;
                     case ItemKind.Delete:
                         foreach (Entity edge in m_DeleteEdges)
@@ -626,9 +656,22 @@ namespace CS2MCP
         private struct EndInfo
         {
             public Entity Entity;
+            /// <summary>&gt; 0 when Entity is a segment split at this curve parameter.</summary>
             public float Split;
             public float3 Position;
             public float Elevation;
+            public bool Snapped;
+            public bool SnapFellBack;
+            public Entity SnapSegment;
+            public float SnapT;
+            public float SnapDistance;
+        }
+
+        private enum EdgeDefinition
+        {
+            Skipped,
+            Defined,
+            Deferred,
         }
 
         /// <summary>
@@ -639,7 +682,7 @@ namespace CS2MCP
         /// segment + m_SplitPosition, as the road tool snaps onto a segment); else
         /// a free point at terrain + elevation.
         /// </summary>
-        private EndInfo ResolveEnd(ImportNode node, ref TerrainHeightData heightData)
+        private EndInfo ResolveEnd(ImportNode node, Entity edgePrefab, ref TerrainHeightData heightData)
         {
             if (node.Entity != Entity.Null
                 && (!EntityManager.Exists(node.Entity) || !EntityManager.HasComponent<Node>(node.Entity)
@@ -652,6 +695,34 @@ namespace CS2MCP
             {
                 float3 position = NodePosition(node, ref heightData, out float elevation);
                 return new EndInfo { Entity = node.Entity, Position = position, Elevation = elevation };
+            }
+            bool snapFellBack = false;
+            if (node.SnapRadius > 0f && !node.SnapTried)
+            {
+                if (FindSnapSegment(node, edgePrefab, out Entity snapSegment, out float snapT, out float snapDistance))
+                {
+                    var info = new EndInfo { Snapped = true, SnapSegment = snapSegment, SnapT = snapT, SnapDistance = snapDistance };
+                    if (snapT < 0.02f || snapT > 0.98f)
+                    {
+                        Edge ends = EntityManager.GetComponentData<Edge>(snapSegment);
+                        info.Entity = snapT < 0.02f ? ends.m_Start : ends.m_End;
+                        info.Position = EntityManager.GetComponentData<Node>(info.Entity).m_Position;
+                        info.Elevation = EntityManager.HasComponent<Game.Net.Elevation>(info.Entity)
+                            ? math.csum(EntityManager.GetComponentData<Game.Net.Elevation>(info.Entity).m_Elevation) * 0.5f
+                            : 0f;
+                    }
+                    else
+                    {
+                        info.Entity = snapSegment;
+                        info.Split = snapT;
+                        info.Position = MathUtils.Position(EntityManager.GetComponentData<Curve>(snapSegment).m_Bezier, snapT);
+                        info.Elevation = EntityManager.HasComponent<Game.Net.Elevation>(snapSegment)
+                            ? math.csum(EntityManager.GetComponentData<Game.Net.Elevation>(snapSegment).m_Elevation) * 0.5f
+                            : 0f;
+                    }
+                    return info;
+                }
+                snapFellBack = true;
             }
             if (node.Absorbed && FindRecordedSegmentAt(node.XZ, out Entity segment, out float t))
             {
@@ -671,7 +742,94 @@ namespace CS2MCP
                 return new EndInfo { Entity = segment, Split = t, Position = MathUtils.Position(curve, t), Elevation = elevation };
             }
             float3 free = NodePosition(node, ref heightData, out float freeElevation);
-            return new EndInfo { Position = free, Elevation = freeElevation };
+            return new EndInfo { Position = free, Elevation = freeElevation, SnapFellBack = snapFellBack };
+        }
+
+        /// <summary>
+        /// snapToSegment: the nearest existing top-level segment within the node's
+        /// radius (measured from its requested position) whose prefab name contains
+        /// the filter and whose layers can connect to the edge's prefab.
+        /// </summary>
+        private bool FindSnapSegment(ImportNode node, Entity edgePrefab, out Entity segment, out float t, out float distance)
+        {
+            segment = Entity.Null;
+            t = 0f;
+            distance = node.SnapRadius;
+            NetData netData = EntityManager.HasComponent<NetData>(edgePrefab) ? EntityManager.GetComponentData<NetData>(edgePrefab) : default;
+            using (NativeArray<Entity> edges = m_EdgeQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity candidate in edges)
+                {
+                    if (EntityManager.HasComponent<Owner>(candidate))
+                    {
+                        continue;
+                    }
+                    Bezier4x3 curve = EntityManager.GetComponentData<Curve>(candidate).m_Bezier;
+                    if (!InBounds(curve.xz, node.OriginalXZ, distance))
+                    {
+                        continue;
+                    }
+                    Entity prefab = EntityManager.GetComponentData<PrefabRef>(candidate).m_Prefab;
+                    if (EntityManager.HasComponent<NetData>(prefab))
+                    {
+                        NetData other = EntityManager.GetComponentData<NetData>(prefab);
+                        if ((netData.m_ConnectLayers & other.m_RequiredLayers) == 0 && (other.m_ConnectLayers & netData.m_RequiredLayers) == 0)
+                        {
+                            continue;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(node.SnapPrefabContains)
+                        && PrefabName(prefab).IndexOf(node.SnapPrefabContains, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+                    float candidateDistance = MathUtils.Distance(curve.xz, node.OriginalXZ, out float candidateT);
+                    if (candidateDistance < distance)
+                    {
+                        distance = candidateDistance;
+                        segment = candidate;
+                        t = candidateT;
+                    }
+                }
+            }
+            return segment != Entity.Null;
+        }
+
+        private string PrefabName(Entity prefab)
+        {
+            if (!m_PrefabNames.TryGetValue(prefab, out string name))
+            {
+                PrefabBase prefabBase = m_PrefabSystem.GetPrefab<PrefabBase>(prefab);
+                name = prefabBase != null ? prefabBase.name : "";
+                m_PrefabNames[prefab] = name;
+            }
+            return name;
+        }
+
+        /// <summary>Applies what resolving an end decided, once the edge is actually defined.</summary>
+        private void CommitEnd(ImportNode node, EndInfo end)
+        {
+            if (end.Snapped)
+            {
+                node.SnapTried = true;
+                node.SnapSegment = end.SnapSegment;
+                node.SnapT = end.SnapT;
+                node.SnapDistance = end.SnapDistance;
+                node.XZ = end.Position.xz;
+                if (end.Split <= 0f)
+                {
+                    node.Entity = end.Entity;
+                }
+            }
+            else if (end.SnapFellBack)
+            {
+                node.SnapTried = true;
+            }
+            if (end.Split > 0f)
+            {
+                m_BatchSplitSegments.Add(end.Entity);
+                m_BatchSplitNodes.Add(node);
+            }
         }
 
         /// <summary>The nearest segment this import created that passes within 1 m of the point.</summary>
@@ -716,23 +874,34 @@ namespace CS2MCP
         /// node entity attach through CoursePos.m_Entity and keep that node's
         /// height (no FreeHeight); free ends sit at terrain + elevation.
         /// </summary>
-        private bool DefineEdge(ImportEdge edge, EntityCommandBuffer commandBuffer, ref TerrainHeightData heightData)
+        private EdgeDefinition DefineEdge(ImportEdge edge, EntityCommandBuffer commandBuffer, ref TerrainHeightData heightData)
         {
             if (edge.Status != "pending")
             {
-                return false;
+                return EdgeDefinition.Skipped;
             }
             ImportNode nodeA = m_Job.Nodes[edge.A];
             ImportNode nodeB = m_Job.Nodes[edge.B];
-            EndInfo endA = ResolveEnd(nodeA, ref heightData);
-            EndInfo endB = ResolveEnd(nodeB, ref heightData);
-            if (endA.Entity != Entity.Null && endA.Entity == endB.Entity
-                && (endA.Split == 0f || math.abs(endA.Split - endB.Split) < 0.01f))
+            if (m_BatchSplitNodes.Contains(nodeA) || m_BatchSplitNodes.Contains(nodeB))
+            {
+                return EdgeDefinition.Deferred;
+            }
+            EndInfo endA = ResolveEnd(nodeA, edge.Prefab, ref heightData);
+            EndInfo endB = ResolveEnd(nodeB, edge.Prefab, ref heightData);
+            if (endA.Entity != Entity.Null && endA.Entity == endB.Entity)
             {
                 edge.Status = "failed";
-                edge.Error = $"both ends resolved to the same entity {endA.Entity.Index}:{endA.Entity.Version}";
-                return false;
+                edge.Error = $"both ends resolve to the same entity {endA.Entity.Index}:{endA.Entity.Version}" +
+                    (endA.Split > 0f || endB.Split > 0f ? " (both would split the same segment)" : "");
+                return EdgeDefinition.Skipped;
             }
+            if ((endA.Split > 0f && m_BatchSplitSegments.Contains(endA.Entity))
+                || (endB.Split > 0f && m_BatchSplitSegments.Contains(endB.Entity)))
+            {
+                return EdgeDefinition.Deferred;
+            }
+            CommitEnd(nodeA, endA);
+            CommitEnd(nodeB, endB);
 
             float3 start = endA.Position;
             float3 end = endB.Position;
@@ -813,7 +982,7 @@ namespace CS2MCP
             });
             commandBuffer.AddComponent(entity, default(Updated));
             commandBuffer.AddComponent(entity, course);
-            return true;
+            return EdgeDefinition.Defined;
         }
 
         /// <summary>Bulldoze definition for a segment, as BridgeToolSystem's demolish (BulldozeToolSystem.AddEntity).</summary>
@@ -1332,6 +1501,42 @@ namespace CS2MCP
             }
 
             var refused = new List<string>(m_NodePrefabsRefused.Values);
+
+            var snaps = new List<object>();
+            int snapRequested = 0;
+            int snapped = 0;
+            int snapFellBack = 0;
+            foreach (ImportNode node in m_Job.Nodes)
+            {
+                if (node.SnapRadius <= 0f)
+                {
+                    continue;
+                }
+                snapRequested++;
+                object entry = null;
+                if (node.SnapSegment != Entity.Null)
+                {
+                    snapped++;
+                    entry = new
+                    {
+                        id = node.Id,
+                        splitSegment = $"{node.SnapSegment.Index}:{node.SnapSegment.Version}",
+                        distance = Math.Round(node.SnapDistance, 2),
+                        t = Math.Round(node.SnapT, 3),
+                        joinedAtEnd = node.SnapT < 0.02f || node.SnapT > 0.98f,
+                        node = node.Entity != Entity.Null ? $"{node.Entity.Index}:{node.Entity.Version}" : null,
+                    };
+                }
+                else if (node.SnapTried)
+                {
+                    snapFellBack++;
+                    entry = new { id = node.Id, result = "no matching segment within radius; built as a free node" };
+                }
+                if (entry != null && snaps.Count < kReportListCap)
+                {
+                    snaps.Add(entry);
+                }
+            }
             return new
             {
                 importId = m_Job.Id,
@@ -1356,6 +1561,7 @@ namespace CS2MCP
                     standaloneCreated = m_NodeSuccesses,
                 },
                 nodesFirst = new { enabled = m_Job.NodesFirst, refusedPrefabs = refused },
+                snapToSegment = new { requested = snapRequested, snapped, fellBack = snapFellBack, details = snaps },
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 frames = m_Frames,
                 seconds = Math.Round((DateTime.UtcNow - m_Started).TotalSeconds, 1),
