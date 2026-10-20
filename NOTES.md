@@ -326,3 +326,27 @@ The logs show no pack activity during the run, so the source is unproven.
 4. If there are invalid groups, `POST ?removeInvalid=true`, then save.
 
 Do not change the playset while the editor is open.
+
+## Round 19 (0.9.19): hierarchy error, revised cause
+
+**Evidence:**
+- On A-v4 the first error was at 14:58:06 (`SceneFlow.log`, timestamped), 6.5 minutes after the editor opened the new map and 29 s into the import run, at the first tree file. `Player.log` has no timestamps, so its line 331 cannot place the error in time.
+- After restarting on 0.9.18, with the same playset and an **empty** map loaded, there were **0** hierarchy errors and `GET /diagnostics/hierarchy` found 0 objects and 49 857 prefabs, all valid. So the error is not present from the start.
+
+**Duplicate prefab IDs are harmless.** The warnings cover the Cliffs pack's CliffSide2 meshes and the climate/render-settings copies carried by old saves. `PrefabSystem.AddPrefab` only logs them; the duplicate still gets its own index (`m_Index = m_Prefabs.Count`) and is appended, so no index shifts. Dropping the pack is not needed for this.
+
+**Revised mechanism** (`EditorHierarchyUISystem`): a race that gets stuck, not a broken object.
+1. When objects change, `UpdateHierarchy` schedules `ObjectHierarchyJob`. It writes every top-level object's `PrefabData` into `m_PrefabsCache` and runs over all objects; it also takes the Prefabs node's entries.
+2. On the next frame, `UpdateFilteredHierarchy` enumerates that `NativeParallelHashSet` on the main thread, before anything waits for the job. Each entry is named with the unchecked `PrefabSystem.GetPrefab` (`m_Prefabs[m_Index]`).
+3. During a big import the job can still be writing. One read of a half-written or stale entry throws `ArgumentOutOfRangeException`.
+4. The throw happens before `UpdateHierarchy` in the same `OnUpdate`, so the cache is never rebuilt. The panel rethrows on the same stale entry every frame, even after the import ends, and probably until the game restarts.
+
+**Effect on the map:**
+- **Harmless to the saved map.** Only the Workspace panel is affected; the save path does not use it and handles negative prefab indices itself. The panel stops updating, and the stack trace logged every frame costs FPS.
+- **Hidden-node workaround:** none. Collapsing or closing the panel does not stop its `OnUpdate`.
+
+**Fixes:**
+- **Restart:** restarting the game clears it, since the cache lives only in memory.
+- **Without a restart:** `POST /diagnostics/hierarchy` (no `removeInvalid`) clears the panel's caches and marks it dirty, so it rebuilds. Available since 0.9.18.
+- **0.9.19 diagnostic:** `GET /diagnostics/hierarchy` also reports `panelCache {entries, invalidEntries, stuck}` straight from the cache. So a stuck panel (invalid cache entries, all objects valid) is told apart from real broken objects (`invalidGroups`, removable with `removeInvalid=true`).
+- **Runner:** `tools/import-run.mjs` should end with `POST /diagnostics/hierarchy`. It is harmless when nothing is stuck. Call it only once the imports are done, so the panel's job is idle.

@@ -104,6 +104,9 @@ namespace CS2MCP
                     }
                 }
             }
+            // Inspect the panel's own cache before any reset: a stale or half-written entry
+            // there keeps it throwing even when every object is fine.
+            object panelCache = InspectHierarchyCache(prefabCount);
             string reset = post ? ResetEditorHierarchy() : null;
 
             return BridgeResponse.Json(new
@@ -114,6 +117,7 @@ namespace CS2MCP
                 invalidGroups = invalid.Count,
                 invalidObjects = toDelete.Count,
                 deleted,
+                panelCache,
                 hierarchyReset = reset,
                 invalid,
                 note = invalid.Count == 0
@@ -121,6 +125,50 @@ namespace CS2MCP
                     : "these objects reference prefabs the game no longer has (removed at runtime, e.g. an asset pack " +
                       "unloaded or updated during the session); POST ?removeInvalid=true deletes them and resets the panel",
             });
+        }
+
+        /// <summary>Counts entries in EditorHierarchyUISystem.m_PrefabsCache whose index is outside the prefab list.</summary>
+        private object InspectHierarchyCache(int prefabCount)
+        {
+            try
+            {
+                EditorHierarchyUISystem hierarchy = World.GetExistingSystemManaged<EditorHierarchyUISystem>();
+                if (hierarchy == null)
+                {
+                    return null;
+                }
+                FieldInfo field = typeof(EditorHierarchyUISystem).GetField("m_PrefabsCache", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (!(field?.GetValue(hierarchy) is NativeParallelHashSet<PrefabData> cache) || !cache.IsCreated)
+                {
+                    return new { readable = false };
+                }
+                using (NativeArray<PrefabData> entries = cache.ToNativeArray(Allocator.Temp))
+                {
+                    var bad = new List<int>();
+                    foreach (PrefabData entry in entries)
+                    {
+                        if (entry.m_Index < 0 || entry.m_Index >= prefabCount)
+                        {
+                            bad.Add(entry.m_Index);
+                        }
+                    }
+                    return new
+                    {
+                        readable = true,
+                        entries = entries.Length,
+                        invalidEntries = bad.Count,
+                        invalidIndices = bad.Count > 20 ? bad.GetRange(0, 20) : bad,
+                        stuck = bad.Count > 0,
+                        note = bad.Count > 0
+                            ? "the Workspace panel holds invalid prefab indices and rethrows every frame; POST /diagnostics/hierarchy resets it"
+                            : null,
+                    };
+                }
+            }
+            catch (Exception e)
+            {
+                return new { readable = false, error = $"{e.GetType().Name}: {e.Message}" };
+            }
         }
 
         private static int PrefabCount(PrefabSystem prefabSystem)
