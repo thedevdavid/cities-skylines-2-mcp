@@ -2047,6 +2047,7 @@ server.registerTool(
             x: z.number(),
             z: z.number(),
             y: z.number().optional(),
+            sink: z.number().min(0).max(1).optional().describe("Per-object grounding sink (fraction of mesh height), overrides options.grounding.sink"),
             rotation: z.number().optional(),
             kind: z.string().optional(),
             age: z.enum(["seedling", "sapling", "adult", "elderly"]).optional(),

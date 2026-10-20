@@ -196,7 +196,7 @@ MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/object
 | `age` | Trees and bushes: `seedling` (AgeMask.Sapling, age 0), `sapling` (young/teen, AgeMask.Young, 0.175), `adult` (default, AgeMask.Mature, 0.425), `elderly` (AgeMask.Elderly, 0.775). Honoured in the editor too since 0.9.10 (the vanilla editor path picks a random age, 5 % of trees dead); never dead. Plants without `TreeData` (grass, ferns, flowers) ignore it. |
 | `net` | Outside connections: `road` or `rail` (see below); anything else (e.g. `air`, `ship`) places the prefab as a free border object. |
 
-**Grounding (`options.grounding`, 0.9.20).** For objects of kind `object` (props, rocks, cliffs, decals) and `plant` (grass, ferns, flowers) that have **no `y`**, the bridge computes the height from the prefab's `ObjectGeometryData.m_Bounds`. Objects with a `y`, as well as trees and buildings, are untouched. Without the option, the pivot sits on the terrain (the game's default). The converter should pass it for prop and object layers.
+**Grounding (`options.grounding`, 0.9.20).** For objects that have **no `y`** and whose prefab the bridge classifies as `object` (props, rocks, cliffs, decals) or `plant` (grass, ferns, flowers), the bridge computes the height from the prefab's `ObjectGeometryData.m_Bounds`. The `kind` hint plays no part, so `prop`, `decal`, `object` or none all get grounding. Objects with a `y`, as well as trees and buildings, are untouched. Without the option, the pivot sits on the terrain (the game's default). The converter should pass it for prop and object layers.
 
 ```json
 "options": { "grounding": { "mode": "boundsMin", "sink": 0.15, "slopeSink": true } }
@@ -205,7 +205,7 @@ MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/object
 | Field | Default | Meaning |
 |---|---|---|
 | `mode` | `boundsMin` | `boundsMin`: y = terrain(x,z) − bounds.min.y, so the mesh bottom sits on the terrain. `pivot`: y = terrain, so the pivot sits on the terrain and only `sink` and `slopeSink` apply. |
-| `sink` | 0 | Then lower y by sink × mesh height (bounds.max.y − bounds.min.y). |
+| `sink` | 0 | Then lower y by sink × mesh height (bounds.max.y − bounds.min.y). A per-object `sink` (since 0.9.21, e.g. `{"id":"porock308_0","prefab":"CliffSlim","sink":0.581,…}`) replaces this value for that object only, and only takes effect when `options.grounding` is set and the object has no `y`. |
 | `slopeSink` | false | Then lower y by the terrain slope × half the larger footprint side, so the downhill edge does not float. The slope is a central difference over ± max(1 m, half footprint) in x and z. |
 | `maxLift` | none | Cap, in metres, on the boundsMin lift (−bounds.min.y). |
 

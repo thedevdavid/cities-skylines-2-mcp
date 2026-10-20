@@ -30,6 +30,8 @@ namespace CS2MCP
             public string kind;
             public string age;
             public string net;
+            /// <summary>Overrides options.grounding.sink for this object.</summary>
+            public float? sink;
         }
 
         public sealed class ObjectOptionsDto
@@ -249,7 +251,7 @@ namespace CS2MCP
                 float? y = dto.y;
                 if (!y.HasValue && options.grounding != null && (obj.Kind == "object" || obj.Kind == "plant"))
                 {
-                    y = GroundedHeight(prefabEntity, position, ground, options.grounding, ref heightData);
+                    y = GroundedHeight(prefabEntity, position, ground, options.grounding, dto.sink, ref heightData);
                     grounded++;
                 }
                 position.y = y ?? ground;
@@ -358,10 +360,10 @@ namespace CS2MCP
         /// <summary>
         /// options.grounding: y for an object without one. boundsMin puts the mesh bottom
         /// (ObjectGeometryData.m_Bounds.min.y below the pivot) on the terrain, pivot keeps the
-        /// pivot there; both then sink by sink × mesh height and, with slopeSink, by the
+        /// pivot there; both then sink by sink × mesh height (the object's own sink, else the option's) and, with slopeSink, by the
         /// terrain slope × half the larger footprint side.
         /// </summary>
-        private float GroundedHeight(Entity prefab, float3 position, float ground, GroundingDto grounding, ref TerrainHeightData heightData)
+        private float GroundedHeight(Entity prefab, float3 position, float ground, GroundingDto grounding, float? objectSink, ref TerrainHeightData heightData)
         {
             if (!EntityManager.HasComponent<ObjectGeometryData>(prefab))
             {
@@ -375,7 +377,7 @@ namespace CS2MCP
             {
                 lift = math.min(lift, math.max(0f, grounding.maxLift.Value));
             }
-            float y = ground + lift - math.max(0f, grounding.sink ?? 0f) * height;
+            float y = ground + lift - math.max(0f, objectSink ?? grounding.sink ?? 0f) * height;
             if (grounding.slopeSink == true)
             {
                 float half = 0.5f * math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
