@@ -652,3 +652,28 @@ All test entities were removed afterwards.
 - **Merged-away nodes:** a node with no CS2 counterpart whose connections are all straight identity mappings is reported as **`notNeeded`**, not skipped.
 - **Offline replay** of the A-v6 graph with a JS port of the matcher: 21 matched, 6 notNeeded, 0 skipped (A-v5 had 19 matched). The lane mapping per connection still has to be shown by the next dry run.
 - **Nodes already holding Traffic data:** the 0.9.26 import already wrote data at some nodes, which are now skipped as "already has Traffic lane connections". Rerun with `--replace` to rebuild them with the new matcher.
+
+## Round 28 (0.9.28, offline): TM:PE root cause
+
+**Root cause: the wrong lane index.**
+- **Proof:** the A-v6 dry run with Traffic's validation (`out/tmpe-import-report.json`, `net-converter/out/x1/tmpe-a6-dry.json`). The 15 connections that went from "created" on A-v5 to "skipped" on A-v6 all fail one rule, e.g. "source lane index 0 is not a road/track lane of edge 65169:11's composition (valid: 2,3,6)". So **the A-v5 import wrote invalid data**, and that is exactly why Traffic dropped 7 of its 9 nodes.
+- **What our writer did:** it took a CS2 lane's index from `Lane.m_StartNode.GetLaneIndex() & 0xFF` of the edge sub-lane, whichever way the lane runs. Traffic needs the edge composition lane index (`NetCompositionLane.m_Index`). The game encodes that index in the edge lane's path node **on the node side**: `PathNode(edge, m_Index, segment)` in `LaneSystem`, which is what Traffic's own `GenerateConnectorsSystem` reads.
+- **Where the wrong value came from:** for an incoming lane, `m_StartNode` is the far end. On split lanes, and on connection lanes whose far end belongs to another entity (`LaneSystem` 3903–3911), it decodes to 0 or 1 instead of 2, 3 or 6.
+- **The same scan miscounted lanes.** It also counted every lane piece of a long edge, giving "CS1 has 2 car lanes, CS2 edge has 4".
+
+**A-v5 against A-v6 is not a regression.** A-v5's 23 "created" connections were mostly invalid and were removed by Traffic. 0.9.26 runs Traffic's checks before writing and reports them as skipped.
+- **Remaining A-v6 losses:** 6 nodes are merged away (straight-through identity data; `notNeeded` since 0.9.27). 3 nodes have edge curves meeting 24–26 m from `Node.m_Position` (fixed in 0.9.27 by matching on curve geometry).
+- **Unexplained:** why the game leaves `m_Position` there is not explained offline; the 0.9.28 self-check reports both points per node.
+
+**0.9.28:**
+- **Lane pieces:** only the edge-lane piece that touches the node counts (`EdgeLane.m_EdgeDelta` at the node's end of the edge).
+- **Lane index:** taken from that piece's node-side path node (`m_EndNode` for incoming, `m_StartNode` for outgoing). The node must be owned by the edge itself, otherwise the lane is skipped.
+- **Traffic pre-validation** (0.9.26) stays as the guard.
+- **Dry-run `selfCheck[]`,** per matched node:
+  - `cs2Node`, `curveMeetingPoint` against `cs1Position`, and `connectedEdges`;
+  - for each CS1 segment: the matched `cs2Edge`, the perpendicular probe `distance`, the CS1 lane count, and the CS2 composition lane indices into and out of the node.
+
+**Next run (A-v7):**
+1. Dry-run the TM:PE import. `selfCheck` should show composition-style lane indices (e.g. 2, 3 rather than 0, 1) with lane counts equal to CS1's.
+2. Check that no connection is skipped by "Traffic validation".
+3. Import, save, reload: Traffic must show no "couldn't load" dialog.

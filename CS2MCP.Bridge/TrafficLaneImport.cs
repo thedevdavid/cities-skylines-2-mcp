@@ -104,6 +104,7 @@ namespace CS2MCP
             var connectionResults = new List<Dictionary<string, object>>();
             var arrowResults = new List<Dictionary<string, object>>();
             var plans = new List<NodePlan>();
+            var nodeChecks = new List<object>();
 
             List<(Entity entity, float3 position)> netNodes = CollectNodes(em);
 
@@ -223,6 +224,7 @@ namespace CS2MCP
                 PlanConnections(em, plan, edges, options, connectionResults);
                 PlanArrows(em, plan, edges, options, arrowResults);
                 plans.Add(plan);
+                nodeChecks.Add(SelfCheck(em, nodeDto, plan, edges, options));
             }
 
             // Traffic's own helper fills lanePositionMap / carriagewayAndGroupIndexMap from the compositions.
@@ -381,6 +383,7 @@ namespace CS2MCP
                     },
                 },
                 nodes = nodeResults,
+                selfCheck = nodeChecks,
                 connections = connectionResults,
                 arrows = arrowResults,
             };
@@ -572,6 +575,41 @@ namespace CS2MCP
                 EdgeDistance = distance,
                 OffsetDelta = bestDelta,
                 RankAgrees = lanes.IndexOf(bestLane) == end.rank,
+            };
+        }
+
+        /// <summary>
+        /// 0.9.28 dry-run self-check: per matched node, which CS2 edge carries each CS1 segment (perpendicular
+        /// probe distance), and the car lanes on both sides with their composition lane indices, so a lane-count
+        /// or index problem is visible before anything is written.
+        /// </summary>
+        private static object SelfCheck(EntityManager em, TmpeNodeDto dto, NodePlan plan, List<EdgeAtNode> edges, TmpeOptionsDto options)
+        {
+            var segments = new List<object>();
+            foreach (TmpeSegmentRefDto r in SegmentRefs(dto))
+            {
+                EdgeAtNode edge = MatchEdge(edges, r, options.edgeTolerance, out float d);
+                List<Cs2Lane> into = edge != null ? CarLanes(em, edge, plan.Position, true) : null;
+                List<Cs2Lane> outOf = edge != null ? CarLanes(em, edge, plan.Position, false) : null;
+                segments.Add(new
+                {
+                    cs1Segment = r.segment,
+                    cs1Prefab = r.prefab,
+                    cs1LaneCount = (r as TmpeLaneEndDto)?.laneCount,
+                    cs2Edge = edge != null ? Id(edge.Edge) : null,
+                    distance = Round(d),
+                    cs2LanesIntoNode = into?.Select(l => l.Index).ToArray(),
+                    cs2LanesOutOfNode = outOf?.Select(l => l.Index).ToArray(),
+                });
+            }
+            return new
+            {
+                id = dto.id,
+                cs2Node = Id(plan.Node),
+                curveMeetingPoint = new[] { Round(plan.Position.x), Round(plan.Position.z) },
+                cs1Position = new[] { Round(dto.x), Round(dto.z) },
+                connectedEdges = edges.Select(e => Id(e.Edge)).ToArray(),
+                segments,
             };
         }
 
@@ -796,8 +834,34 @@ namespace CS2MCP
                     continue;
                 }
                 Bezier4x3 b = em.GetComponentData<Curve>(lane).m_Bezier;
-                bool endsAtNode = math.distance(b.d.xz, nodePosition.xz) < math.distance(b.a.xz, nodePosition.xz);
-                if (endsAtNode != incoming)
+                // 0.9.28: the game splits long edge lanes into pieces (EdgeLane.m_EdgeDelta); only the piece
+                // touching the node counts, otherwise a 2-lane edge cut in two looked like 4 lanes.
+                Lane laneData = em.GetComponentData<Lane>(lane);
+                PathNode nodeSide;
+                if (em.HasComponent<EdgeLane>(lane))
+                {
+                    float2 delta = em.GetComponentData<EdgeLane>(lane).m_EdgeDelta;
+                    float nodeDelta = edge.IsEnd ? 1f : 0f;
+                    bool endsAtNode = math.abs(delta.y - nodeDelta) < 0.001f;
+                    bool startsAtNode = math.abs(delta.x - nodeDelta) < 0.001f;
+                    if (incoming ? !endsAtNode : !startsAtNode)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    bool endsAtNode = math.distance(b.d.xz, nodePosition.xz) < math.distance(b.a.xz, nodePosition.xz);
+                    if (endsAtNode != incoming)
+                    {
+                        continue;
+                    }
+                }
+                // The node-side path node carries the composition lane index (LaneSystem: PathNode(edge,
+                // NetCompositionLane.m_Index, segment)); the far side of a split piece is a middle node with
+                // a running counter, which is what 0.9.26 wrote for incoming lanes (Traffic rejected it).
+                nodeSide = incoming ? laneData.m_EndNode : laneData.m_StartNode;
+                if (!nodeSide.OwnerEquals(new PathNode(edge.Edge, 0)))
                 {
                     continue;
                 }
@@ -812,7 +876,7 @@ namespace CS2MCP
                 lanes.Add(new Cs2Lane
                 {
                     SubLane = lane,
-                    Index = em.GetComponentData<Lane>(lane).m_StartNode.GetLaneIndex() & 0xff,
+                    Index = nodeSide.GetLaneIndex() & 0xff,
                     Lateral = math.dot(end.xz - centre, right),
                 });
             }
