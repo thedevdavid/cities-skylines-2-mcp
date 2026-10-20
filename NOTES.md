@@ -520,3 +520,34 @@ The prefab class was already reported as `type`.
 - **Undo** does not remove the plant yet.
 
 **Look:** climate, water render settings and terrain render settings can be listed, selected and edited field by field (MAP_SETTINGS.md "Look"). An edit clones a read-only prefab, as the editor's Edit buttons do. A map-specific latitude/longitude is therefore possible through a climate copy, which is saved into the map.
+
+## Round 24 (0.9.24, offline): the 309 lost segments on A-v4
+
+**Anarchy (decompiled Anarchy.dll, mod 74604) does not protect net segments.**
+- **What it adds:** `Anarchy.Components.PreventOverride`, an empty tag. `AnarchyPlopSystem` adds it to entities that are `Applied`, have `Static`, `Object` or `EditorContainer`, and have no `Owner`, i.e. top-level objects. Only while the toggle is on and Object/Line/Net Tool is active.
+- **What it does:** `PreventOverrideSystem` strips the game's `Overridden` flag from tagged entities and marks them `Updated`. `Overridden` is what hides an object that a net or area overlaps.
+- **On load:** `AnarchyPlopSystem.OnGameLoadingComplete` removes `PreventOverride` from everything except certain static non-building objects.
+- **Nets:** no net edge is ever tagged. In the game, `Overridden` on net entities is set only on fence utility lanes (`Game.Net.OverrideSystem`), never on edges.
+- **Validation:** the game validates only `Temp` entities while a tool runs. No game system deletes a permanent segment for carrying an error.
+
+So "segments built without Anarchy's protection get removed later" has no mechanism in either code base.
+
+**What the lost segments have in common** (`out/x1/live-lost-edges.json` against `import-all` + bridges + gaps, analysis script in the session scratchpad):
+- **Chains, not scattered edges.** 284 matched edges form 57 connected chains. An edge sharing a node with a lost edge was lost in 59 % of cases, against 0.5 % for the rest.
+- **The chains sit on the imported surfaces.** 44 of the 57 chains, holding **260 of the 284 edges**, touch (≤ 10 m) a polygon from the surfaces step: Agriculture Surface 01 fields 189, Sand Surface 01 78, PO Pavement Surface 01 22.
+- **Fields are the clearest case:** of the import edges whose midpoint lies **inside a field polygon, 47 were lost and 4 kept (92 %)**.
+- **Prefabs and shape:** Gravel Road 207 (farm tracks inside fields), highway 2-lane 44 (near sand), Pavement Path 10, Small/Medium Road 15. 92 % are ground-level. Slope, length and node degree do not stand out.
+- **The run-A comparison does not apply.** Run A's graph (`out/live-graph.json`) was pulled on 2026-10-19 at 03:03 UTC, before any surface file existed (first commit 2026-10-19 06:24 PDT). "Live in run A" therefore only shows the segments survived the network step; it says nothing about bypass against Anarchy.
+- **Prime suspect:** the surfaces step, or something done after it, removes road chains lying under the surface polygons. The decompile gives no mechanism: our area definitions are plain (no `Delete`/`ClearArea`), and `ClearArea` only works inside building sub-areas. So it must be caught live.
+
+**0.9.24:**
+- **`netGuard` in every `/import/objects` and `/import/surfaces` report.** Every top-level and owned segment is snapshotted before each batch and compared after it. The report gives `segmentsRemoved`, `geometryGone` (no segment left within 6 m: not a split or merge) and, per batch that removed any, the item ids and up to 50 lost segments with position and prefab. A deletion that lands a frame late shows up under the next batch.
+- **`GET /net/count`:** top-level segments per prefab, plus owned segments.
+- **Anarchy protection for objects:** with `bypassValidation`, every created top-level static object (not buildings, not surfaces) gets `PreventOverride` through reflection when Anarchy is loaded, as with the toggle on. The report shows it under `validation.anarchyPreventOverride {available, added}`. Nets and areas get nothing, because no such protection exists.
+
+**Verification for the next run** (it must pass before an A-v5 is accepted):
+1. **Right after the network steps:** `GET /net/count`, then save the numbers.
+2. **After each later step:** check that step's report `netGuard.segmentsRemoved`; it must be 0. The runner should stop at the first non-zero value. If the surfaces step is the culprit, `netGuard.batches[].items` names the surface ids.
+3. **After 2 minutes of editor time** with no input: `GET /net/count` must equal step 1, per prefab.
+4. **After save, then load (a name without a leading space):** `GET /net/count` must equal step 1 again.
+5. **On a mismatch at 3 or 4:** pull `/graph/export` and diff it against the import set with `tools/live-analysis.mjs`.

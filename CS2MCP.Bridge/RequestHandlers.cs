@@ -207,6 +207,8 @@ namespace CS2MCP
                     return ImportResources(request);
                 case "/map/resources":
                     return ReadResources(request);
+                case "/net/count":
+                    return NetCount();
                 case "/map/look/schema":
                     return LookSchema();
                 case "/net/pillars/remove":

@@ -151,6 +151,11 @@ namespace CS2MCP
                 },
                 None = new[] { ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<Deleted>() },
             });
+            m_GuardEdgeQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Curve>(), ComponentType.ReadOnly<PrefabRef>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
             m_IconQuery = EntityManager.CreateEntityQuery(
                 ComponentType.ReadOnly<Game.Notifications.Icon>(),
                 ComponentType.ReadOnly<Owner>(),
@@ -208,6 +213,10 @@ namespace CS2MCP
             };
         }
 
+        private EntityQuery m_GuardEdgeQuery;
+        private NetGuard m_NetGuard;
+        private int m_Protected;
+
         public bool TryStartImport(ObjectJob job, BridgeRequest request)
         {
             if (m_Stage != Stage.Idle)
@@ -215,6 +224,8 @@ namespace CS2MCP
                 return false;
             }
             m_Job = job;
+            m_NetGuard = new NetGuard(EntityManager, m_GuardEdgeQuery);
+            m_Protected = 0;
             m_Record = new ObjectRecord { Id = job.Id, Name = job.Name };
             m_UndoTarget = null;
             m_Queue.Clear();
@@ -721,6 +732,12 @@ namespace CS2MCP
                         obj.Status = "created";
                         obj.Entity = entity;
                         m_Record.Entities.Add(entity);
+                        // What Anarchy's toggle would have added: keeps the object visible where a
+                        // net or area overlaps it (the game's Overridden flag).
+                        if (m_Job.BypassValidation && obj.Polygon == null && AnarchyProtection.Protect(EntityManager, entity))
+                        {
+                            m_Protected++;
+                        }
                     }
                     else
                     {
@@ -729,8 +746,23 @@ namespace CS2MCP
                     }
                 }
             }
+            if (!m_Current.Delete && m_NetGuard != null)
+            {
+                var ids = new List<string>();
+                foreach (int index in m_Current.Indices)
+                {
+                    ids.Add(m_Job.Objects[index].Id);
+                }
+                m_NetGuard.AfterBatch($"batch {m_BatchesApplied}", ids, GuardPrefabName);
+            }
             m_Current = null;
             m_Stage = Stage.Define;
+        }
+
+        private string GuardPrefabName(Entity prefab)
+        {
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            return prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabData>(prefab), out PrefabBase p) ? p.name : "?";
         }
 
         private List<string> CollectTempErrors()
@@ -885,7 +917,14 @@ namespace CS2MCP
                     ignoreErrors = m_IgnoreErrorsAtStart,
                     anarchyDetected = m_AnarchyDetected,
                     anarchyEnabled = m_AnarchyEnabledAtStart,
+                    anarchyPreventOverride = new
+                    {
+                        available = AnarchyProtection.Available,
+                        added = m_Protected,
+                        note = "with bypassValidation, created top-level static objects get Anarchy's PreventOverride (as with Anarchy's toggle on), so nets/areas overlapping them do not hide them; nets and areas themselves have no such protection",
+                    },
                 },
+                netGuard = m_NetGuard?.Report(),
                 undo = new
                 {
                     objectsRecorded = m_Record != null ? m_Record.Entities.Count : 0,

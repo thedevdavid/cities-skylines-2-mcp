@@ -427,6 +427,35 @@ namespace CS2MCP
             });
         }
 
+        /// <summary>GET /net/count: live network segments per prefab (top-level and owned), for before/after checks.</summary>
+        private BridgeResponse NetCount()
+        {
+            var perPrefab = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int total = 0, owned = 0;
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            using (EntityQuery query = EntityManager.CreateEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Game.Prefabs.PrefabRef>() },
+                None = new[] { ComponentType.ReadOnly<Game.Tools.Temp>(), ComponentType.ReadOnly<Game.Common.Deleted>() },
+            }))
+            using (Unity.Collections.NativeArray<Entity> edges = query.ToEntityArray(Unity.Collections.Allocator.Temp))
+            {
+                foreach (Entity e in edges)
+                {
+                    if (EntityManager.HasComponent<Game.Common.Owner>(e))
+                    {
+                        owned++;
+                        continue;
+                    }
+                    total++;
+                    Entity prefab = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(e).m_Prefab;
+                    string name = prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabData>(prefab), out PrefabBase p) ? p.name : "?";
+                    perPrefab[name] = perPrefab.TryGetValue(name, out int c) ? c + 1 : 1;
+                }
+            }
+            return BridgeResponse.Json(new { topLevelSegments = total, ownedSegments = owned, perPrefab, at = DateTime.UtcNow });
+        }
+
         private static float DistanceToLine(float2 p, float2 a, float2 b)
         {
             float2 ab = b - a;
