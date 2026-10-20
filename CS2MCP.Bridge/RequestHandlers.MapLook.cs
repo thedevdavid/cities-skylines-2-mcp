@@ -112,7 +112,7 @@ namespace CS2MCP
                     seasons.Add(new
                     {
                         season = s.m_Prefab != null ? s.m_Prefab.name : null,
-                        startMonth = s.m_StartTime,
+                        startTime = s.m_StartTime,
                         tempNightDay = new[] { s.m_TempNightDay.x, s.m_TempNightDay.y },
                         tempDeviationNightDay = new[] { s.m_TempDeviationNightDay.x, s.m_TempDeviationNightDay.y },
                         cloudChance = s.m_CloudChance,
@@ -365,6 +365,10 @@ namespace CS2MCP
                     return new[] { f3.x, f3.y, f3.z };
                 case double2 d2:
                     return new[] { d2.x, d2.y };
+                case Vector2 v2:
+                    return new[] { v2.x, v2.y };
+                case Vector4 v4:
+                    return new[] { v4.x, v4.y, v4.z, v4.w };
                 case Color c:
                     return ColorArray(c);
                 case AnimationCurve curve:
@@ -395,7 +399,7 @@ namespace CS2MCP
             return v.ToString();
         }
 
-        private static void AssignFields(object target, JObject edits, string path, List<string> applied, List<string> problems)
+        private void AssignFields(object target, JObject edits, string path, List<string> applied, List<string> problems)
         {
             foreach (KeyValuePair<string, JToken> edit in edits)
             {
@@ -410,10 +414,22 @@ namespace CS2MCP
                 {
                     object current = field.GetValue(target);
                     Type ft = field.FieldType;
-                    if (ft.IsArray && edit.Value is JArray array && ft.GetElementType() != null && !ft.GetElementType().IsPrimitive
-                        && current is Array existing && array.Count > 0 && array[0] is JObject)
+                    Type elementType = ft.IsArray ? ft.GetElementType() : null;
+                    if (elementType != null && !elementType.IsPrimitive && !typeof(PrefabBase).IsAssignableFrom(elementType)
+                        && edit.Value is JArray array && array.Count > 0 && array[0] is JObject)
                     {
-                        // Element edits: [{index, field: value, ...}], index defaults to the position.
+                        // Element edits: [{index, field: value, ...}]; index defaults to the position.
+                        // An index at or past the end appends a new element (class defaults);
+                        // {index, remove: true} deletes one.
+                        var items = new List<object>();
+                        if (current is Array existing)
+                        {
+                            foreach (object o in existing)
+                            {
+                                items.Add(o);
+                            }
+                        }
+                        var removed = new HashSet<int>();
                         for (int i = 0; i < array.Count; i++)
                         {
                             if (!(array[i] is JObject element))
@@ -421,20 +437,92 @@ namespace CS2MCP
                                 continue;
                             }
                             int index = element.Value<int?>("index") ?? i;
-                            if (index < 0 || index >= existing.Length || existing.GetValue(index) == null)
+                            element.Remove("index");
+                            if (element.Value<bool?>("remove") == true)
                             {
-                                problems.Add($"{where}[{index}]: out of range (0..{existing.Length - 1})");
+                                if (index >= 0 && index < items.Count)
+                                {
+                                    removed.Add(index);
+                                    applied.Add($"{where}[{index}] removed");
+                                }
+                                else
+                                {
+                                    problems.Add($"{where}[{index}]: nothing to remove (0..{items.Count - 1})");
+                                }
                                 continue;
                             }
-                            element.Remove("index");
-                            object item = existing.GetValue(index);
+                            if (index < 0)
+                            {
+                                problems.Add($"{where}[{index}]: negative index");
+                                continue;
+                            }
+                            while (index >= items.Count)
+                            {
+                                items.Add(elementType.IsValueType || elementType.GetConstructor(Type.EmptyTypes) != null ? Activator.CreateInstance(elementType) : null);
+                                applied.Add($"{where}[{items.Count - 1}] added");
+                            }
+                            object item = items[index] ?? Activator.CreateInstance(elementType);
                             AssignFields(item, element, $"{where}[{index}]", applied, problems);
-                            existing.SetValue(item, index);
+                            items[index] = item;
+                        }
+                        var result = new List<object>();
+                        for (int i = 0; i < items.Count; i++)
+                        {
+                            if (!removed.Contains(i))
+                            {
+                                result.Add(items[i]);
+                            }
+                        }
+                        Array updated = Array.CreateInstance(elementType, result.Count);
+                        for (int i = 0; i < result.Count; i++)
+                        {
+                            updated.SetValue(result[i], i);
+                        }
+                        field.SetValue(target, updated);
+                        continue;
+                    }
+                    if (elementType != null && typeof(PrefabBase).IsAssignableFrom(elementType) && edit.Value is JArray names)
+                    {
+                        Array refs = Array.CreateInstance(elementType, names.Count);
+                        bool ok = true;
+                        for (int i = 0; i < names.Count; i++)
+                        {
+                            PrefabBase found = FindPrefabByName(elementType, names[i].Value<string>());
+                            if (found == null)
+                            {
+                                problems.Add($"{where}[{i}]: no {elementType.Name} named '{names[i]}'");
+                                ok = false;
+                                break;
+                            }
+                            refs.SetValue(found, i);
+                        }
+                        if (ok)
+                        {
+                            field.SetValue(target, refs);
+                            applied.Add(where);
                         }
                         continue;
                     }
+                    if (typeof(PrefabBase).IsAssignableFrom(ft) && edit.Value.Type == JTokenType.String)
+                    {
+                        PrefabBase found = FindPrefabByName(ft, edit.Value.Value<string>());
+                        if (found == null)
+                        {
+                            var available = new List<string>();
+                            foreach (PrefabBase p in AllPrefabsOf(ft))
+                            {
+                                available.Add(p.name);
+                            }
+                            problems.Add($"{where}: no {ft.Name} named '{edit.Value}'; available: {string.Join(", ", available)}");
+                            continue;
+                        }
+                        field.SetValue(target, found);
+                        applied.Add(where);
+                        continue;
+                    }
                     if (edit.Value is JObject nested && current != null && !(current is Color) && !ft.IsPrimitive
-                        && !(current is float2) && !(current is float3) && !(current is double2))
+                        && !(current is float2) && !(current is float3) && !(current is double2)
+                        && !(current is Vector2) && !(current is Vector4))
                     {
                         AssignFields(current, nested, where, applied, problems);
                         if (ft.IsValueType)
@@ -495,6 +583,14 @@ namespace CS2MCP
                 {
                     value = new double2(d2[0].Value<double>(), d2[1].Value<double>());
                 }
+                else if (type == typeof(Vector2) && token is JArray v2 && v2.Count == 2)
+                {
+                    value = new Vector2(v2[0].Value<float>(), v2[1].Value<float>());
+                }
+                else if (type == typeof(Vector4) && token is JArray v4 && v4.Count == 4)
+                {
+                    value = new Vector4(v4[0].Value<float>(), v4[1].Value<float>(), v4[2].Value<float>(), v4[3].Value<float>());
+                }
                 else if (type == typeof(float3) && token is JArray a3 && a3.Count == 3)
                 {
                     value = new float3(a3[0].Value<float>(), a3[1].Value<float>(), a3[2].Value<float>());
@@ -516,6 +612,92 @@ namespace CS2MCP
                 value = null;
             }
             return value != null;
+        }
+        private PrefabBase FindPrefabByName(Type type, string name)
+        {
+            foreach (PrefabBase p in AllPrefabsOf(type))
+            {
+                if (string.Equals(p.name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return p;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// GET /map/look/schema: every field of ClimatePrefab (+ SeasonInfo), WaterRenderSettingsPrefab and
+        /// TerrainRenderSettingsPrefab (+ nested settings) with type, editor range ([Range]/[RangeN]),
+        /// default (from a fresh instance), tooltip, whether the editor shows it and whether the bridge writes it.
+        /// </summary>
+        private BridgeResponse LookSchema()
+        {
+            return BridgeResponse.Json(new
+            {
+                climate = SchemaOf(typeof(ClimatePrefab)),
+                season = SchemaOf(typeof(ClimateSystem.SeasonInfo)),
+                waterRenderSettings = SchemaOf(typeof(WaterRenderSettingsPrefab)),
+                terrainRenderSettings = SchemaOf(typeof(TerrainRenderSettingsPrefab)),
+                terrainBlurDepth = SchemaOf(typeof(TerrainBlurDepthData)),
+                terrainDepthScale = SchemaOf(typeof(TerrainDepthScaleSetting)),
+                terrainTiling = SchemaOf(typeof(TerrainTilingData)),
+                note = "write with POST /map/settings {climateEdit | waterEdit | terrainEdit}; keys with or without m_; seasons as [{index, ...}] (append past the end, {index, remove:true} deletes)",
+            });
+        }
+
+        private static List<object> SchemaOf(Type type)
+        {
+            object defaults = null;
+            try
+            {
+                defaults = typeof(ScriptableObject).IsAssignableFrom(type) ? ScriptableObject.CreateInstance(type) : Activator.CreateInstance(type);
+            }
+            catch (Exception)
+            {
+            }
+            var fields = new List<object>();
+            foreach (FieldInfo f in type.GetFields(BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (f.DeclaringType == typeof(PrefabBase) || f.DeclaringType == typeof(UnityEngine.Object) || f.DeclaringType == typeof(ScriptableObject))
+                {
+                    continue;
+                }
+                object range = null;
+                var r = f.GetCustomAttribute<RangeAttribute>();
+                if (r != null)
+                {
+                    range = new[] { r.min, r.max };
+                }
+                var rn = f.GetCustomAttribute<Game.UI.Widgets.RangeNAttribute>();
+                if (rn != null)
+                {
+                    range = new { min = new[] { rn.min.x, rn.min.y }, max = new[] { rn.max.x, rn.max.y } };
+                }
+                Type ft = f.FieldType;
+                bool writable = ft.IsPrimitive || ft.IsEnum || ft == typeof(string) || ft == typeof(float2) || ft == typeof(double2) || ft == typeof(float3)
+                    || ft == typeof(Color) || ft == typeof(Vector2) || ft == typeof(Vector4) || typeof(PrefabBase).IsAssignableFrom(ft)
+                    || (ft.IsArray && ft.GetElementType() != null && !ft.GetElementType().IsPrimitive)
+                    || (ft.IsClass && ft.Namespace != null && ft.Namespace.StartsWith("Game", StringComparison.Ordinal));
+                if (ft == typeof(AnimationCurve) || ft.Name.StartsWith("AssetReference", StringComparison.Ordinal))
+                {
+                    writable = false;
+                }
+                fields.Add(new
+                {
+                    field = f.Name,
+                    type = ft.IsArray ? ft.GetElementType()?.Name + "[]" : ft.Name,
+                    range,
+                    @default = defaults == null ? null : DumpValue(f.GetValue(defaults), 3),
+                    tooltip = f.GetCustomAttribute<TooltipAttribute>()?.tooltip,
+                    shownInEditor = f.GetCustomAttribute<Game.UI.Widgets.HideInEditorAttribute>() == null,
+                    writable,
+                });
+            }
+            if (defaults is UnityEngine.Object o)
+            {
+                UnityEngine.Object.DestroyImmediate(o);
+            }
+            return fields;
         }
     }
 }

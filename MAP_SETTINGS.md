@@ -49,6 +49,7 @@ The bridge does the same:
 | Call | What it does |
 |---|---|
 | `GET /prefabs?category=climate|waterRenderSettings|terrainRenderSettings[&detail=1][&query=]` (MCP `cs2_find_prefabs`, `detail: true`) | Every prefab of that kind: vanilla, DLC, mods and copies embedded in maps (all prefabs in `PrefabSystem`). Each comes with `current`, `readOnly`, `asset` and a `summary`, plus all fields with `detail`. |
+| `GET /map/look/schema` | Every field of the three prefabs (and of seasons and the nested terrain settings): type, range, default, tooltip, shownInEditor, writable. |
 | `GET /map/settings[?detail=1]` | `look.climate`, `look.waterRenderSettings`, `look.terrainRenderSettings`: the current prefab, its summary and, with `detail`, all fields. |
 | `POST /map/settings {climate, waterRenderSettings, terrainRenderSettings}` | Selects the prefab by name, as the picker does. |
 | `POST /map/settings {climateEdit, waterEdit, terrainEdit}` | Field edits on the current prefab. A read-only one is cloned first, as the Edit button does, and `applied` says so. Then the panel's refresh runs. |
@@ -60,38 +61,110 @@ The bridge does the same:
   - `float2`/`double2` as `[x, y]`;
   - colours as `[r, g, b(, a)]` (0–1) or `"#rrggbb"`;
   - nested objects as objects;
-  - array elements as `[{index, field: value}]`.
-- **Not settable:** `AnimationCurve` fields, the texture references (`AssetReference`) and prefab references. The curves are generated from the seasons.
+  - `Vector2`/`Vector4` as arrays;
+  - prefab references (`m_DefaultWeather`, a season's `m_Prefab`) by prefab name;
+  - nested objects as objects;
+  - array elements as `[{index, field: value}]`, where an index past the end appends and `{index, remove: true}` deletes.
+- **Not settable:** `AnimationCurve` fields (generated from the seasons) and the texture references (`AssetReference`; use the panel's image picker).
 
-**ClimatePrefab fields** (summary in the listing):
-- **Sun position:** `m_Latitude`, `m_Longitude`, `m_MaxSunElevationAngle`, `m_SunElevationClampStart`.
-- **Climate values:** `m_FreezingTemperature` and `m_RandomSeed` (the editor's "Pick new seed" sets 1–99).
-- **Weather:** `m_DefaultWeather` and `m_DefaultWeathers` (prefab references, read-only here).
-- **Seasons:** `m_Seasons[]` (`ClimateSystem.SeasonInfo`), each with:
-  - `m_Prefab` (the season prefab, read-only) and `m_StartTime` (month 0–12);
-  - `m_TempNightDay` [night, day] °C and `m_TempDeviationNightDay`;
-  - `m_CloudChance`, `m_CloudAmount`, `m_CloudAmountDeviation` (%);
-  - `m_PrecipitationChance`, `m_PrecipitationAmount`, `m_PrecipitationAmountDeviation` (%);
-  - `m_Turbulence`, `m_AuroraAmount`, `m_AuroraChance`.
-- **Generated curves:** `RebuildCurves()` regenerates the temperature, precipitation, cloudiness, aurora and fog curves (the panel's five graphs) from the seasons and the seed. **There are no separate fog, sun or aurora overrides:** fog is derived from cloudiness, precipitation and temperature.
-- **Summary values:** the listing's summary adds `temperatureRange`, `averageCloudiness` and `averagePrecipitation`.
-- **Day length:** follows from the latitude (`PlanetarySystem`).
-- **Snow:** follows from temperature against `m_FreezingTemperature`.
+### Full field reference (0.9.23)
 
-**WaterRenderSettingsPrefab fields:**
-- **Colour:** `m_WaterColor`, `m_WaterScatteringColor`.
-- **Light through the water:** `m_AbsorptionDistance`, `m_MaxRefractionDistance`, `m_AmbientScattering`, `m_HeightScattering`, `m_DisplacementScattering`, `m_DirectLightTipScattering`, `m_DirectLightBodyScattering`.
-- **Surface:** `m_FoamAmount`, `m_FoamFadeRange`, `m_WavesMultiplier`, `m_LakeWavesMultiplier`, `m_MinWaterAmountForWaves`, `m_SeaWindAffectWavesDirection`.
-- **Caustics, ripples and smoothness:** `m_CausticsPlaneDistance`, `m_CausticsIntensity`, `m_RipplesWindSpeed`, `m_RipplesChaos`, `m_SmoothnessClose`, `m_SmoothnessDistant`, `m_SmoothnessRange`.
-- **CS1 Theme Mixer mapping:** the water colour maps to `m_WaterColor` and `m_WaterScatteringColor`; clarity maps to `m_AbsorptionDistance`.
+Read from the decompiled `ClimatePrefab`, `ClimateSystem.SeasonInfo`, `WaterRenderSettingsPrefab`, `TerrainRenderSettingsPrefab`, `TerrainBlurDepthData`, `TerrainDepthScaleSetting` and `TerrainTilingData` (game 1.6.2). Ranges are the editor's `[Range]`/`[RangeN]` slider limits. The game does not clamp values written from code, so stay inside them. `GET /map/look/schema` returns the same list from the running game: type, range, default (from a fresh instance), tooltip, `shownInEditor` and `writable`.
 
-**TerrainRenderSettingsPrefab fields:**
-- **Textures (read-only here):** rock, dirt and grass diffuse/normal, and the `Extra1…4` diffuse/normal textures.
-- **Settable per extra layer:** `m_ExtraNDirtOverride`, `m_ExtraNSplatRange`, `m_ExtraNBlurDepth`, `m_ExtraNHeightOffset`.
-- **Blending:** `m_BlurDepth` {…}, `m_TriplanarHeightMapBlending`, `m_TriplanarBlendStrengthY`, `m_SplatMultiplier`, `m_SplatPower`.
-- **Depth and tiling:** `m_DepthScaleSettings` {…}, `m_TerrainRockTiling` / `m_TerrainGrassTiling` {…}.
-- **Format:** `m_UseLegacyTextureFormat`.
-- **Texture swaps:** these need a terrain render settings prefab that already carries the textures, selected by name.
+**How each value is set:**
+- **Per-map copies:** every value below is per map, but only through a **map-specific copy** of the prefab. The game has no other per-map override; the map stores which climate, water and terrain prefab it uses.
+- **Editing a shared prefab:** `climateEdit` / `waterEdit` / `terrainEdit` on a read-only (vanilla, DLC or mod) prefab first clones it to "<name> (copy)", exactly like the editor's Edit button. The copy is embedded in the map on save. Picking a prefab by name (`climate` / `waterRenderSettings` / `terrainRenderSettings`) uses it as it is.
+- **Panel paths:** Editor → right panel. Climate: "Climate Settings". Water and terrain: "Environment" → "Water Rendering Settings" / "Terrain Rendering Settings". In both panels: pick a prefab, then "Edit …", then the fields.
+
+#### Climate (`climateEdit`), panel "Climate Settings"
+
+| Field | Type | Range | Default | Meaning / writable |
+|---|---|---|---|---|
+| `m_Latitude` | float | −90…90 | 61.498 | Sun path and day length (`PlanetarySystem`). Writable. Persistent only through the copy. |
+| `m_Longitude` | float | −180…180 | 23.767 | Sun timing. Writable. |
+| `m_MaxSunElevationAngle` | double | 45…90 | 90 | "The Sun will be limited to not rise higher above the horizon than this". Writable. |
+| `m_SunElevationClampStart` | double | 0…90 | 45 | Angle where the clamp starts to deviate. Writable. |
+| `m_FreezingTemperature` | float | – | 0 | °C below which precipitation is snow and snow cover builds up. Writable. |
+| `m_RandomSeed` | int | editor 1–99 ("Pick new seed") | 1 | Seed for the generated weather curves. Writable. |
+| `m_DefaultWeather` | WeatherPrefab | – | – | Default weather. Writable by WeatherPrefab name. |
+| `m_DefaultWeathers` | WeatherPrefab[] | – | [] | Weather set. Writable as a list of names. |
+| `m_Seasons` | SeasonInfo[] | – | [] | Seasons in year order; see below. Edit as `[{index, …}]`: an index past the end appends, `{index, remove: true}` deletes. |
+| `m_Temperature`, `m_Precipitation`, `m_Cloudiness`, `m_Aurora`, `m_Fog` | AnimationCurve | – | generated | Hidden in the editor (`[HideInEditor]`). `RebuildCurves()` regenerates them from the seasons and the seed after every edit; they are the panel's five graphs. **Not writable.** Change the seasons instead. |
+
+**Season fields** (`ClimateSystem.SeasonInfo`, `climateEdit.seasons[i]`):
+
+| Field | Type | Range | Default | Meaning |
+|---|---|---|---|---|
+| `m_Prefab` | SeasonPrefab | – | – | Which season this is (spring/summer/autumn/winter variants); it drives the vegetation look. Writable by SeasonPrefab name. Required for an appended season. |
+| `m_StartTime` | float | 0…1 | 0 | Start as a fraction of the year. **Season lengths** are the gaps between consecutive start times (`EnsureSeasonsOrder` sorts them). |
+| `m_TempNightDay` | float2 [night, day] | −70…70 | [5, 20] | Mean night and day temperature, °C. |
+| `m_TempDeviationNightDay` | float2 | 0.5…40 | [4, 7] | Spread of night and day temperature. |
+| `m_CloudChance` | float | 0…100 | 50 | Chance of clouds, %. |
+| `m_CloudAmount` | float | 0…100 | 40 | Cloud cover, %. |
+| `m_CloudAmountDeviation` | float | 1…100 | 20 | Spread of cloud cover. |
+| `m_PrecipitationChance` | float | 0…100 | 30 | Chance of rain or snow, %. |
+| `m_PrecipitationAmount` | float | 0…100 | 40 | Rain or snow amount, %. |
+| `m_PrecipitationAmountDeviation` | float | 1…100 | 30 | Spread of the amount. |
+| `m_Turbulence` | float | 0…1 | 0.2 | Wind turbulence. |
+| `m_AuroraAmount` | float | 0…1 | 1 | Aurora strength. |
+| `m_AuroraChance` | float | 0…100 | 10 | Chance of aurora, %. |
+
+**Climate items without a field of their own:**
+- **Fog:** generated from cloudiness, precipitation and temperature (`RebuildFogCurves`).
+- **Snow:** precipitation below `m_FreezingTemperature`.
+- **Day and night:** latitude plus the sun clamp.
+- **Year length:** fixed at 12 (`kYearDuration`).
+- **Wind direction:** the panel's wind control writes `WindSimulationSystem`, not the climate, and is not saved with the climate. Not exposed by the bridge.
+
+#### Water rendering (`waterEdit`), panel "Environment → Water Rendering Settings"
+
+| Field | Type | Range | Default | Look aspect |
+|---|---|---|---|---|
+| `m_WaterColor` | Color | – | (0.14, 0.62, 0.62) | Base water colour (absorption tint) |
+| `m_AbsorptionDistance` | float | 0…100 | 8 | Transparency / depth falloff: metres until the water is opaque |
+| `m_MaxRefractionDistance` | float | 0…4 | 3 | Refraction distortion depth |
+| `m_WaterScatteringColor` | Color | – | (0.19, 0.33, 0.39) | Scattering colour |
+| `m_AmbientScattering` | float | 0…1 | 0.2 | Scattering from ambient light |
+| `m_HeightScattering` | float | 0…1 | 0.2 | Scattering by wave height |
+| `m_DisplacementScattering` | float | 0…1 | 0.1 | Scattering by displacement |
+| `m_DirectLightTipScattering` | float | 0…1 | 0.6 | Sunlight through wave tips |
+| `m_DirectLightBodyScattering` | float | 0…1 | 0.4 | Sunlight through the wave body |
+| `m_FoamAmount` | float | 0…2 | 0.3 | Foam |
+| `m_FoamFadeRange` | float2 [start, distance] | 0…1000, 500…1500 | [500, 1500] | Foam fade with camera distance |
+| `m_WavesMultiplier` | float | 0…2 | 1 | Sea waves |
+| `m_LakeWavesMultiplier` | float | 0…1 | 1 | Lake waves |
+| `m_MinWaterAmountForWaves` | float | 5…200 | 10 | Water depth before waves appear (shallow and shoreline calm) |
+| `m_SeaWindAffectWavesDirection` | bool | – | false | Waves follow the sea wind |
+| `m_RipplesWindSpeed` | float | 0…15 | 5 | Ripples |
+| `m_RipplesChaos` | float | 0…1 | 1 | Ripple chaos |
+| `m_SmoothnessClose` | float | 0…0.99 | 0.95 | Reflection sharpness up close |
+| `m_SmoothnessDistant` | float | 0…0.99 | 0.85 | Reflection sharpness far away |
+| `m_SmoothnessRange` | float2 [start, distance] | 0…1000, 500…1500 | [100, 500] | Blend range between the two |
+| `m_CausticsPlaneDistance` | float | 0…10 | 4 | Caustics depth |
+| `m_CausticsIntensity` | float | 0…3 | 1 | Caustics strength |
+
+**Water items with no map setting:**
+- **Pollution tint:** the game has none per map. Polluted water is drawn by the water shader from the simulation's pollution, and the pollution infoview uses `WaterRenderSystem.overlayPollutionMask`, a runtime overlay.
+- **Shoreline:** no separate parameters beyond `m_MinWaterAmountForWaves` and the foam. Neither can be set from code or in the editor.
+
+#### Terrain rendering (`terrainEdit`), panel "Environment → Terrain Rendering Settings"
+
+| Field | Type | Range | Default | Look aspect |
+|---|---|---|---|---|
+| `m_RockDiffuse` / `m_RockNormal`, `m_DirtDiffuse` / `m_DirtNormal`, `m_GrassDiffuse` / `m_GrassNormal` | texture | – | – | Base terrain textures. **Not writable from code.** Set them in the panel's image picker; it imports a texture. |
+| `m_Extra1…4Diffuse` / `m_Extra1…4Normal` | texture | – | – | Extra layers. **Not writable from code;** same panel. |
+| `m_ExtraNDirtOverride` (N = 1…4) | float | 0…1 | 0 | How much extra layer N replaces dirt |
+| `m_ExtraNSplatRange` | float | 0.1…1 | 1 | Splat range of layer N |
+| `m_ExtraNBlurDepth` | float | 0.01…0.3 | 0.1 | Blend blur of layer N |
+| `m_ExtraNHeightOffset` | float | −0.4…0.4 | 0 | Height-blend offset of layer N |
+| `m_UseLegacyTextureFormat` | bool | – | false | Legacy texture layout (no extra layers) |
+| `m_BlurDepth` {`m_NearBlurDepth` 0.01…2, `m_FarBlurDepth` 0.01…2, `m_NearDistance` 0…250, `m_FarDistance` 250…5000} | object | per field | {0.1, 0.25, 50, 500} | Texture blending blur by distance |
+| `m_TriplanarHeightMapBlending` | float | – | 0.5 | Cliff (triplanar) blending |
+| `m_TriplanarBlendStrengthY` | float | 0.01…1 | 0.2 | Vertical triplanar strength |
+| `m_SplatMultiplier` | float | – | 2 | Splat-map contrast |
+| `m_SplatPower` | float | – | 1 | Splat-map curve |
+| `m_DepthScaleSettings` {`m_Rock`, `m_Dirt`, `m_Grass`: Vector2 [x, y]} | object | – | [1, 1] each | Height/depth scale per material |
+| `m_TerrainRockTiling` / `m_TerrainGrassTiling` / `m_TerrainDirtTiling` {`m_FarTiling`, `m_MidTiling`, `m_NearTiling` 1…20000} | object | 1…20000 | {40, 1600, 2400} | Texture tiling at three distances |
 
 **Other climate-panel items:** the editor's wind-direction control (`WindSimulationSystem.SetWind`) is not part of the climate prefab and is not exposed here.
 
