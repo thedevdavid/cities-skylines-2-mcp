@@ -9,6 +9,7 @@ Surfaces are **area entities with a polygon**, not texture or mask data:
 - **Prefab:** `SurfacePrefab : AreaPrefab`. It adds `SurfaceData` and `AreaGeometryData` (`m_Type = AreaType.Surface`).
 - **Instance:** an entity with `Game.Areas.Area`, `Surface` (a tag), `Geometry`, `Expand` and a `DynamicBuffer<Game.Areas.Node>`. Each node is a position plus an elevation.
 - **Rendering:** the game triangulates the polygon (`Triangle` buffer) and renders the surface material over the terrain. Surfaces save into the map like any area.
+- **Closed ring (0.9.26):** the bridge writes the node buffer closed (first node repeated at the end), as the area tool does. Only then does the game mark the area `Complete`. Before 0.9.26 imported surfaces were incomplete areas, and with `bypassValidation` they deleted the nets and objects under them (NOTES round 26b).
 - **Shape rules:** a polygon is a single outer ring. **There are no holes.** `Game.Areas.ValidationHelpers.ValidateArea` rejects self-intersecting rings and rings without triangles as `InvalidShape`. I found no surface-vs-surface overlap check in that code path, but overlap behaviour should be checked in-game.
 - **How the editor creates one:** the Areas/Surface tool (`AreaToolSystem`) writes a `CreationDefinition { m_Prefab }` plus a `Node` buffer through `ToolOutputBarrier`. The generate and apply systems turn the Temp area into the permanent one (`ApplyAreasSystem.Create` removes `Temp`, keeping the entity). The bridge already used this path for districts (`/build/district`).
 

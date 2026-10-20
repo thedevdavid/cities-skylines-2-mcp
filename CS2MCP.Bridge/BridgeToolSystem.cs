@@ -519,6 +519,11 @@ namespace CS2MCP
             {
                 nodes.Add(new Game.Areas.Node(position, float.MinValue));
             }
+            // Closed ring = Complete area (see BridgeObjectToolSystem.DefineArea, 0.9.26).
+            if (m_PendingAreaNodes.Length >= 3 && !m_PendingAreaNodes[0].Equals(m_PendingAreaNodes[m_PendingAreaNodes.Length - 1]))
+            {
+                nodes.Add(new Game.Areas.Node(m_PendingAreaNodes[0], float.MinValue));
+            }
         }
 
         /// <summary>

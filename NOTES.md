@@ -611,3 +611,30 @@ So "segments built without Anarchy's protection get removed later" has no mechan
 - **Pre-validation:** the importer runs a port of Traffic's checks before writing (`ValidateLikeTraffic`, dry run included). A source lane that would fail is skipped with `reason: "Traffic validation: <rule>"`, so Traffic never sees invalid data and never drops a whole node.
 - **Node matching in x/z only:** previously it was 3D, and CS1 and CS2 heights differ (n27789 "nearest 167 m"). Every node within `options.nodeSearchRadius` (default 60 m) is scored by how well its edges pass the probe points of the CS1 segments the node's data uses. The node matching the most segments wins, ties broken by mean probe distance + 0.1 × x/z distance. A node farther than `nodeRadius` (12 m) is accepted only if its edges carry every segment. `nodes[].match` reports "k/n CS1 segments matched".
 - **Next run:** after the restart, a **dry run** of the same body names the rule each of the former 7 nodes breaks and shows whether the 8 skipped nodes now match. Then import for real and check that Traffic shows no "couldn't load" dialog after save and reload.
+
+### Round 26b (0.9.26): why imported surfaces deleted roads, found and fixed
+
+**Reproduced live on A5**, in the empty test area at (−3000, −6200):
+- **Road first, then surface:** a Gravel Road (206 m), then a 60 m `Sand Surface 01` square over it.
+  - With `bypassValidation` false, the surface is refused as `OverlapExisting`.
+  - With `bypassValidation` true, the surface is applied and the road entity is destroyed (netGuard `segmentsRemoved` 1, `geometryGone` 1, entity gone).
+- **Surface first, then road:** both survive.
+- **`PDO23 Sand Surface 01`** behaves like the vanilla prefab (`OverlapExisting`).
+
+All test entities were removed afterwards.
+
+**Cause (decompiled):**
+- **Our areas were never `Complete`.** `GenerateAreasSystem` sets `AreaFlags.Complete` on a new area only when its node buffer has at least 4 nodes and the **last node equals the first**, which is how `AreaToolSystem` (and its GenerateAreas helper) write them. `BridgeObjectToolSystem.DefineArea` wrote the polygon open (the handler even strips a closing point), so every imported surface was an *incomplete* area.
+- **Overlaps became Warnings.** `ValidationSystem` validates an incomplete area with `noErrors = true`, so `Game.Areas.ValidationHelpers.ValidateTriangle` reports its overlaps with **`ErrorSeverity.Warning`**. `AddError` puts the `Warning` component on the overlapped permanent entity (the road, or an object).
+- **Apply deletes Warning entities.** **`ToolApplySystem` adds `Deleted` to every entity with `Warning`.** This step is meant for incomplete previews, which the vanilla tool never applies. With `ignoreErrors`, the overlap Warning (plus the Error on the area itself) no longer blocks the apply, so every surface batch deleted the nets **and objects** it overlapped.
+- **This explains A-v4:** the lost chains were the gravel tracks under the fields, plus highways and paths under the sand and pavement.
+
+**Fix (0.9.26):**
+- **Surfaces:** `DefineArea` closes the ring, so the area is `Complete`. Overlaps are then `Error` severity: bypass places the surface over the net, and the road keeps only a transient `Error` tag.
+- **Districts:** the district tool's area definition is closed the same way.
+- **Unverified in game.** After the restart, the same test (road, then surface with bypass) must show netGuard `segmentsRemoved: 0`.
+
+**Consequences for existing maps:**
+- **Objects too:** trees, props and rocks under every surface imported before 0.9.26 were also deleted. netGuard tracks only nets.
+- **Incomplete areas remain:** surfaces already imported are stored as incomplete areas. Re-import them with 0.9.26 (undo and import, or rebuild the map) so they are `Complete` like hand-painted ones.
+- **Order:** importing surfaces before networks also avoided the loss, because nets placed over a surface keep both. 0.9.26 makes the order irrelevant.

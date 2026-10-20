@@ -533,6 +533,14 @@ namespace CS2MCP
             {
                 nodes.Add(new Game.Areas.Node(new float3(point.x, 0f, point.y), float.MinValue));
             }
+            // 0.9.26: close the ring. GenerateAreasSystem marks a new area Complete only when its
+            // node buffer has >= 4 nodes and the last equals the first (as AreaToolSystem and its
+            // GenerateAreas helper write them). An incomplete area is validated with noErrors, so
+            // what it overlaps gets the Warning component instead of Error, and on Apply
+            // ToolApplySystem adds Deleted to every Warning entity: with bypassValidation every
+            // imported surface deleted the net segments and objects under it (A-v4: 309 segments).
+            float2 first = obj.Polygon[0];
+            nodes.Add(new Game.Areas.Node(new float3(first.x, 0f, first.y), float.MinValue));
         }
 
         /// <summary>Bulldoze definition for a top-level object or area, as BulldozeToolSystem.AddEntity.</summary>
