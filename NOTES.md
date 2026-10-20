@@ -375,3 +375,28 @@ Do not change the playset while the editor is open.
 3. If it still hangs with the minimal playset, the cause is in vanilla content: object count, or the embedded climate/render-settings prefabs. Then re-run the import into a fresh map, save after networks, objects and trees separately, and test-load each save to bisect.
 
 The bridge cannot repair a saved `.cok`, and nothing about how it sets the climate needs to change.
+
+### Round 20b: ranking the A4 differences for the load spin (code review, offline)
+
+**Ruled out:**
+- **Leading space in the name:** the asset database resolved `%20dakota-A4-2048.cok`, and the loader read the MapMetadata, the serialized version and the format tags. The spin starts after that.
+- **Climate set through `/map/settings`:** the Climate panel's setter does the identical assignment (`ClimateSystem.currentClimate = entity`). At save, `PrefabSystem.SaveClimate` → `SavePrefab` returns early for a read-only (vanilla) climate, so nothing is embedded and the map stores the prefab id like any vanilla map. The "References were null…" warning is benign.
+
+**Not ruled out:**
+- **Medium: 96 `Arc Pedestrian Bridge` edges (decor arches).** These are a structural first for us. The Arc bridges are very likely fixed-span bridge prefabs (`FixedNetElement`), which the net tool builds with fixed element indices; our importer writes plain courses with `m_FixedIndex = -1`. Load-time geometry and composition for such edges is untested.
+- **Medium-low: power ends on building connectors.** A line ending on a building's marker node is the normal state that the vanilla tool also saves. A4 may be non-vanilla in one way: a CS1 line node adopted as the station's connector (a `High-voltage Line` node owned by the building) carried 2–3 segments, with the dam line passing through it. No load-time loop over that was found in `ElectricityBuildingGraphSystem`.
+- **Medium-low: 239 po-rocks with absolute y up to about 150 m under the terrain.** No load-time object system loops on height; placement validation does not run on load. Their `Elevation` is 0, so they are simply objects below the surface.
+- **Low: lakes, fort, po-structures, po-walls, rock scatter.** These are of the same kinds as content in map A, which loads.
+
+**Reading the `.cok`:** not feasible. It is zstd-compressed ECS streams with no public schema, and the spin is after the header, probably in post-load systems or a mod's load hook, so a reader position would not show it.
+
+**Fastest safe path to a loadable map:**
+1. **One cheap test first:** load A4 with a minimal playset (CS2MCP plus the asset packs; no Traffic, Water Features or Lumina). If it loads, it is a mod: bisect the mods and keep the map.
+2. **Otherwise a staged rebuild with test-loads,** riskiest items last and alone. Save under a new name after each stage, reload it (about 2 min each), then continue:
+   - **S1:** A-equivalent content plus lakes, fort, rock scatter, po-structures, po-walls.
+   - **S2:** + po-rocks. If S2 hangs, re-import them with no `y`, i.e. on the terrain.
+   - **S3:** + Arc Pedestrian Bridge edges. If S3 hangs, drop them or map them to a non-fixed path prefab.
+   - **S4:** + power ends.
+   - **S5:** map settings (climate, theme).
+
+   Every stage before its save can be undone, so a hanging stage costs one reload and the previous save survives.
