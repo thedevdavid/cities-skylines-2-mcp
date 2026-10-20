@@ -41,19 +41,55 @@ namespace CS2MCP
         {
             public List<TerrainTextureItemDto> textures;
             public bool? dryRun;
+            public bool? worker;
         }
 
         private static readonly string[] kTextureSlots = { "Rock", "Dirt", "Grass", "Extra1", "Extra2", "Extra3", "Extra4" };
 
-        /// <summary>GET / POST /map/terrain-textures</summary>
+        /// <summary>One file of a terrain texture job (0.9.32).</summary>
+        private sealed class TextureImportItem
+        {
+            public string Field;
+            public string File;
+            public string State = "queued"; // queued, importing, done, failed
+            public string Guid;
+            public string AssetName;
+            public string Error;
+            public double ImportSeconds;
+            public double SaveSeconds;
+            public System.Threading.Tasks.Task<TextureImporter.Texture> Task;
+            public System.Diagnostics.Stopwatch Clock;
+        }
+
+        private sealed class TextureImportJob
+        {
+            public int Id;
+            public bool Worker;
+            public DateTime Started;
+            public DateTime? Finished;
+            public List<TextureImportItem> Items = new List<TextureImportItem>();
+            public List<string> Problems = new List<string>();
+            public bool Applied;
+            public bool Done => Finished.HasValue;
+        }
+
+        private static int s_TextureJobCounter;
+        private TextureImportJob m_TextureJob;
+        // guid -> "file (seconds, result)" for the GET's names; survives jobs, not game restarts.
+        private readonly Dictionary<string, string> m_ImportedTextureNames = new Dictionary<string, string>();
+
+        /// <summary>
+        /// GET / POST /map/terrain-textures. 0.9.32: POST queues the files and returns a job id at once;
+        /// BridgeSystem advances the job every frame (PumpTerrainTextureJob). Decoding/compressing runs on a
+        /// worker thread one file at a time (worker:false = on the main thread, one file per frame);
+        /// AddAsset/Save/field assignment stay on the main thread. GET /map/terrain-textures/status.
+        /// </summary>
         private BridgeResponse TerrainTextures(BridgeRequest request)
         {
             if (!TryGetCityOrEditor(out _, out BridgeResponse error))
             {
                 return error;
             }
-            var applied = new List<string>();
-            var problems = new List<string>();
             if (request.Method == "POST")
             {
                 TerrainTexturesDto body;
@@ -67,9 +103,13 @@ namespace CS2MCP
                 }
                 if (body?.textures == null || body.textures.Count == 0)
                 {
-                    return BridgeResponse.Error(400, "POST {textures:[{slot: Rock|Dirt|Grass|Extra1..Extra4, diffuse: <image path>, normal: <image path>}]}");
+                    return BridgeResponse.Error(400, "POST {textures:[{slot: Rock|Dirt|Grass|Extra1..Extra4, diffuse: <image path>, normal: <image path>}], worker?: true}");
                 }
-                // Validate first.
+                if (m_TextureJob != null && !m_TextureJob.Done)
+                {
+                    return BridgeResponse.Json(new { error = "a terrain texture job is still running", job = TextureJobStatus(m_TextureJob) }, 409);
+                }
+                var problems = new List<string>();
                 foreach (TerrainTextureItemDto t in body.textures)
                 {
                     if (t == null || Array.IndexOf(kTextureSlots, t.slot) < 0)
@@ -89,29 +129,38 @@ namespace CS2MCP
                 {
                     return BridgeResponse.Json(new { error = "nothing was changed", problems }, 400);
                 }
-                if (body.dryRun != true)
+                var job = new TextureImportJob { Id = ++s_TextureJobCounter, Worker = body.worker != false, Started = DateTime.Now };
+                foreach (TerrainTextureItemDto t in body.textures)
                 {
-                    // An editable copy, as the Environment panel's "Edit terrain rendering settings" button.
-                    var noEdits = new Newtonsoft.Json.Linq.JObject();
-                    EditLook(typeof(TerrainRenderSettingsPrefab), noEdits, applied, problems, "terrainTextures");
-                    var settings = CurrentLookPrefab(typeof(TerrainRenderSettingsPrefab)) as TerrainRenderSettingsPrefab;
-                    if (settings == null)
+                    if (!string.IsNullOrEmpty(t.diffuse))
                     {
-                        return BridgeResponse.Json(new { error = "no current terrain render settings", problems }, 409);
+                        job.Items.Add(new TextureImportItem { Field = $"m_{t.slot}Diffuse", File = t.diffuse });
                     }
-                    foreach (TerrainTextureItemDto t in body.textures)
+                    if (!string.IsNullOrEmpty(t.normal))
                     {
-                        if (!string.IsNullOrEmpty(t.diffuse))
-                        {
-                            ImportIntoField(settings, $"m_{t.slot}Diffuse", t.diffuse, applied, problems);
-                        }
-                        if (!string.IsNullOrEmpty(t.normal))
-                        {
-                            ImportIntoField(settings, $"m_{t.slot}Normal", t.normal, applied, problems);
-                        }
+                        job.Items.Add(new TextureImportItem { Field = $"m_{t.slot}Normal", File = t.normal });
                     }
-                    World.GetOrCreateSystemManaged<TerrainMaterialSystem>().ApplyRenderSettings();
                 }
+                if (body.dryRun == true)
+                {
+                    return BridgeResponse.Json(new { dryRun = true, files = job.Items.ConvertAll(i => new { field = i.Field, file = i.File }) });
+                }
+                // An editable copy, as the Environment panel's "Edit terrain rendering settings" button.
+                var applied = new List<string>();
+                EditLook(typeof(TerrainRenderSettingsPrefab), new Newtonsoft.Json.Linq.JObject(), applied, job.Problems, "terrainTextures");
+                if (!(CurrentLookPrefab(typeof(TerrainRenderSettingsPrefab)) is TerrainRenderSettingsPrefab))
+                {
+                    return BridgeResponse.Json(new { error = "no current terrain render settings", problems = job.Problems }, 409);
+                }
+                m_TextureJob = job;
+                Mod.Log.Info($"terrain texture job {job.Id}: {job.Items.Count} files queued ({(job.Worker ? "worker thread" : "main thread, one per frame")})");
+                return BridgeResponse.Json(new
+                {
+                    job = job.Id,
+                    queued = job.Items.Count,
+                    status = "/map/terrain-textures/status",
+                    note = "the files import one at a time in the background; poll GET /map/terrain-textures/status until done, then save the map",
+                }, 202);
             }
             var current = CurrentLookPrefab(typeof(TerrainRenderSettingsPrefab)) as TerrainRenderSettingsPrefab;
             var slots = new List<object>();
@@ -128,64 +177,212 @@ namespace CS2MCP
             {
                 terrainRenderSettings = current?.name,
                 readOnly = current != null && (current.isReadOnly || (current.asset != null && current.asset.isPersistent)),
-                applied = request.Method == "POST" ? applied : null,
-                problems = request.Method == "POST" ? problems : null,
                 slots,
+                lastJob = m_TextureJob == null ? null : TextureJobStatus(m_TextureJob),
                 note = "POST imports each image as a TextureAsset into the user asset database (as the editor's image picker does) " +
                        "and assigns it to an editable copy of the current terrain render settings; save the map to keep it. " +
                        "Extra1..4 are the four material-paint slots (Dry, Lush, Dirt, Sand by default); the m_ExtraN* numbers and tiling stay settable via /map/settings terrainEdit.",
             });
         }
 
-        private static string FieldTexture(TerrainRenderSettingsPrefab settings, string field)
+        /// <summary>GET /map/terrain-textures/status</summary>
+        private BridgeResponse TerrainTexturesStatus(BridgeRequest request)
         {
-            object value = typeof(TerrainRenderSettingsPrefab).GetField(field)?.GetValue(settings);
-            return value?.ToString();
+            if (m_TextureJob == null)
+            {
+                return BridgeResponse.Json(new { job = (int?)null, note = "no terrain texture job since the game started" });
+            }
+            return BridgeResponse.Json(TextureJobStatus(m_TextureJob));
         }
 
-        private void ImportIntoField(TerrainRenderSettingsPrefab settings, string fieldName, string file, List<string> applied, List<string> problems)
+        private static object TextureJobStatus(TextureImportJob job)
         {
-            FieldInfo field = typeof(TerrainRenderSettingsPrefab).GetField(fieldName);
-            if (field == null)
+            int done = job.Items.FindAll(i => i.State == "done").Count;
+            int failed = job.Items.FindAll(i => i.State == "failed").Count;
+            return new
             {
-                problems.Add($"{fieldName}: no such field");
+                job = job.Id,
+                state = job.Done ? (failed > 0 ? "finished with failures" : "done") : "running",
+                worker = job.Worker,
+                total = job.Items.Count,
+                done,
+                failed,
+                renderSettingsApplied = job.Applied,
+                seconds = Math.Round(((job.Finished ?? DateTime.Now) - job.Started).TotalSeconds, 1),
+                log = job.Items.ConvertAll(i => new
+                {
+                    field = i.Field,
+                    file = i.File,
+                    result = i.State,
+                    importSeconds = Math.Round(i.ImportSeconds, 2),
+                    saveSeconds = Math.Round(i.SaveSeconds, 2),
+                    guid = i.Guid,
+                    asset = i.AssetName,
+                    error = i.Error,
+                }),
+                problems = job.Problems,
+            };
+        }
+
+        /// <summary>
+        /// Called by BridgeSystem every frame: advances the terrain texture job by at most one file.
+        /// </summary>
+        internal void PumpTerrainTextureJob()
+        {
+            TextureImportJob job = m_TextureJob;
+            if (job == null || job.Done)
+            {
                 return;
             }
-            var attribute = field.GetCustomAttribute<TextureImportAttribute>();
+            var settings = CurrentLookPrefab(typeof(TerrainRenderSettingsPrefab)) as TerrainRenderSettingsPrefab;
+            TextureImportItem item = job.Items.Find(i => i.State == "importing") ?? job.Items.Find(i => i.State == "queued");
+            if (item == null || settings == null)
+            {
+                if (settings == null)
+                {
+                    job.Problems.Add("the terrain render settings went away (map unloaded?); remaining files skipped");
+                    foreach (TextureImportItem i in job.Items)
+                    {
+                        if (i.State == "queued" || i.State == "importing")
+                        {
+                            i.State = "failed";
+                            i.Error = "skipped";
+                        }
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        World.GetOrCreateSystemManaged<TerrainMaterialSystem>().ApplyRenderSettings();
+                        job.Applied = true;
+                    }
+                    catch (Exception e)
+                    {
+                        job.Problems.Add($"ApplyRenderSettings: {e.GetType().Name}: {e.Message}");
+                    }
+                }
+                job.Finished = DateTime.Now;
+                Mod.Log.Info($"terrain texture job {job.Id} finished in {(job.Finished.Value - job.Started).TotalSeconds:F1} s");
+                return;
+            }
+            FieldInfo field = typeof(TerrainRenderSettingsPrefab).GetField(item.Field);
+            if (field == null)
+            {
+                item.State = "failed";
+                item.Error = "no such field";
+                return;
+            }
+            if (item.State == "queued")
+            {
+                DefaultTextureImporter.ImportSettings importSettings = ImportSettingsFor(field);
+                string file = item.File;
+                item.Clock = System.Diagnostics.Stopwatch.StartNew();
+                item.State = "importing";
+                if (job.Worker)
+                {
+                    item.Task = System.Threading.Tasks.Task.Run(() => new DefaultTextureImporter().Import(importSettings, file));
+                    return;
+                }
+                try
+                {
+                    item.Task = System.Threading.Tasks.Task.FromResult(new DefaultTextureImporter().Import(importSettings, file));
+                }
+                catch (Exception e)
+                {
+                    Fail(item, e);
+                    return;
+                }
+            }
+            if (!item.Task.IsCompleted)
+            {
+                return;
+            }
+            item.ImportSeconds = item.Clock.Elapsed.TotalSeconds;
+            if (item.Task.IsFaulted || item.Task.IsCanceled)
+            {
+                Fail(item, item.Task.Exception?.GetBaseException() ?? new OperationCanceledException());
+                return;
+            }
+            var save = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var importer = new DefaultTextureImporter();
-                DefaultTextureImporter.ImportSettings importSettings = DefaultTextureImporter.ImportSettings.GetDefault();
-                if (attribute != null)
-                {
-                    importSettings.alphaIsTransparency = attribute.alphaIsTransparency;
-                    importSettings.compressBC = attribute.bcCompress;
-                    importSettings.linearTexture = attribute.isLinear;
-                    importSettings.normalMap = attribute.isNormalMap;
-                    if (attribute.isNormalMap)
-                    {
-                        importSettings.overrideCompressionFormat = Colossal.AssetPipeline.Native.NativeTextures.BlockCompressionFormat.BC7;
-                    }
-                    importSettings.wrapMode = attribute.wrapMode;
-                }
                 ILocalAssetDatabase user = AssetDatabase.user;
-                using (TextureImporter.Texture texture = importer.Import(importSettings, file))
+                using (TextureImporter.Texture texture = item.Task.Result)
                 {
-                    AssetDataPath path = AssetImportPipeline.GetPath(null, UncheckedPath.GetLastPathSegmentOrRoot(file, out _),
-                        $"{texture.name}_{HashUtils.GetHash(texture, file)}", DataType.RawTexture, user);
+                    AssetDataPath path = AssetImportPipeline.GetPath(null, UncheckedPath.GetLastPathSegmentOrRoot(item.File, out _),
+                        $"{texture.name}_{HashUtils.GetHash(texture, item.File)}", DataType.RawTexture, user);
                     using (Colossal.IO.AssetDatabase.TextureAsset asset = user.AddAsset(path, texture))
                     {
                         asset.Save();
                         field.SetValue(settings, (AssetReference<Colossal.IO.AssetDatabase.TextureAsset>)asset.id.guid);
-                        applied.Add($"{fieldName} <- {Path.GetFileName(file)} ({asset.id.guid})");
+                        item.Guid = asset.id.guid.ToString();
+                        item.AssetName = asset.name;
+                        m_ImportedTextureNames[item.Guid] = $"{asset.name} <- {Path.GetFileName(item.File)}";
                     }
                 }
+                item.State = "done";
             }
             catch (Exception e)
             {
-                problems.Add($"{fieldName}: {e.GetType().Name}: {e.Message}");
+                Fail(item, e);
+            }
+            finally
+            {
+                item.Task = null;
+                item.SaveSeconds = save.Elapsed.TotalSeconds;
+            }
+            Mod.Log.Info($"terrain texture job {job.Id}: {item.Field} <- {Path.GetFileName(item.File)} {item.State} (import {item.ImportSeconds:F1} s, save {item.SaveSeconds:F1} s){(item.Error != null ? ": " + item.Error : "")}");
+        }
+
+        private static void Fail(TextureImportItem item, Exception e)
+        {
+            item.State = "failed";
+            item.Error = $"{e.GetType().Name}: {e.Message}";
+            item.Task = null;
+            if (item.Clock != null && item.ImportSeconds == 0)
+            {
+                item.ImportSeconds = item.Clock.Elapsed.TotalSeconds;
             }
         }
+
+        private static DefaultTextureImporter.ImportSettings ImportSettingsFor(FieldInfo field)
+        {
+            DefaultTextureImporter.ImportSettings importSettings = DefaultTextureImporter.ImportSettings.GetDefault();
+            var attribute = field.GetCustomAttribute<TextureImportAttribute>();
+            if (attribute != null)
+            {
+                importSettings.alphaIsTransparency = attribute.alphaIsTransparency;
+                importSettings.compressBC = attribute.bcCompress;
+                importSettings.linearTexture = attribute.isLinear;
+                importSettings.normalMap = attribute.isNormalMap;
+                if (attribute.isNormalMap)
+                {
+                    importSettings.overrideCompressionFormat = Colossal.AssetPipeline.Native.NativeTextures.BlockCompressionFormat.BC7;
+                }
+                importSettings.wrapMode = attribute.wrapMode;
+            }
+            return importSettings;
+        }
+
+        /// <summary>guid and asset name of an AssetReference&lt;TextureAsset&gt; field, or "default" when unset.</summary>
+        private object FieldTexture(TerrainRenderSettingsPrefab settings, string field)
+        {
+            object value = typeof(TerrainRenderSettingsPrefab).GetField(field)?.GetValue(settings);
+            if (!(value is AssetReference reference) || !reference.guid.isValid)
+            {
+                return "default";
+            }
+            string guid = reference.guid.ToString();
+            string name = null;
+            if (AssetDatabase.global.TryGetAsset(reference.guid, out Colossal.IO.AssetDatabase.TextureAsset asset))
+            {
+                name = asset.name;
+            }
+            m_ImportedTextureNames.TryGetValue(guid, out string imported);
+            return new { guid, name, imported };
+        }
+
 
         public sealed class MapTimeDto
         {

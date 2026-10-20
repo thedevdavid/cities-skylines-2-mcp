@@ -215,6 +215,8 @@ namespace CS2MCP
                     return TerrainPaintProbe(request);
                 case "/import/terrain-paint/undo":
                     return TerrainPaintUndo(request);
+                case "/map/terrain-textures/status":
+                    return TerrainTexturesStatus(request);
                 case "/map/terrain-textures":
                     return TerrainTextures(request);
                 case "/map/time":

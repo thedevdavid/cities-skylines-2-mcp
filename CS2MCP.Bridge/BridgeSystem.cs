@@ -91,6 +91,7 @@ namespace CS2MCP
                 Mod.Log.Info("timed run finished, simulation auto-paused");
             }
             m_Handlers.EnsureHierarchyCacheCapacity();
+            m_Handlers.PumpTerrainTextureJob();
             while (m_Pending.TryDequeue(out BridgeRequest request))
             {
                 BridgeResponse response;

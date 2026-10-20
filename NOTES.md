@@ -729,3 +729,14 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Not the cause:** `CourseSplitSystem.SnapCoursePositions` shifts at most 2 m (4 m snap).
 - **Evidence for A-v8:** the import report's `snapToSegment.details[]` gains `driftAfterBuild` (metres from the requested point to the live junction node) and `nodeDegree`.
 - **Test on A-v8:** a snapped T on a long straight gravel road, alone in one import. If the drift appears there, the split node is being reduced in the same tool cycle, and the fix is to pin it (a `Fixed`/elevated-like `ForbidMove`, or adding the edge in the split's own definition). If not, a later import moves it, and that import is the place to fix.
+
+## Round 32 (0.9.32)
+
+**A-v8 `POST /map/terrain-textures` (14 files):**
+- **What happened:** the bridge timed out ("simulation thread did not respond within 10s") and the window went black for about 2 min.
+- **The imports did complete:** `ImportedData/TextureAssets` holds all 14 `.Texture` and `.cid` files, written 15:42:53–15:44:41. Player.log has no exception. Each field is assigned right after its file's `Save`, and `ApplyRenderSettings` runs after the loop.
+- **Why GET looked broken:** it printed `AssetReference<TextureAsset>.ToString()`, which is the type name.
+
+**Fix:**
+- POST is now a background job: a worker-thread import, one file at a time, plus `GET /map/terrain-textures/status` with the per-file log.
+- GET prints each slot's guid and asset name, or `default`.

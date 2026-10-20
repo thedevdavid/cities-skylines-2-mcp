@@ -180,7 +180,7 @@ POST /map/settings
 
 The prefab names here are examples; list the real ones with `/prefabs?category=…`. **Unverified in game:** that a clone made through the bridge is saved into the map exactly like an editor clone. The code path is the same (`Clone` + `AddPrefab` + current), so it is expected to be.
 
-## Terrain textures (`GET` / `POST /map/terrain-textures`, 0.9.31)
+## Terrain textures (`GET` / `POST /map/terrain-textures`, 0.9.31; background job 0.9.32)
 
 This does what the Environment panel's image picker does (`Game.UI.Editor.DualImagePickerPopupField.OnSelectFile`):
 1. `DefaultTextureImporter.Import`, with the slot's `[TextureImport]` settings (albedo, or mask map for the normals, wrap Repeat, BC compression);
@@ -199,7 +199,10 @@ POST /map/terrain-textures
 
 - **Slots:** `Rock`, `Dirt`, `Grass`, `Extra1`–`Extra4`. Each has `diffuse` and `normal`, and either may be omitted.
 - **Formats:** the importer's (`ImageAsset.kExtensions`, png/jpg/tga…).
-- **GET** lists the current asset reference of every slot.
+- **Background job (0.9.32):** POST validates, queues the files and answers `202 {job, queued}` at once. Each frame the bridge advances the job by one file. Decoding and BC compression run on a worker thread, one file at a time; `AddAsset`, `Save` and the field assignment run on the main thread. `ApplyRenderSettings` runs once, after the last file. `"worker": false` imports on the main thread, one file per frame; each such frame still stalls for that file's import (0.9.31 measured about 2 min for 14 files, two of them 4096²). A second POST while a job runs answers 409.
+- **`GET /map/terrain-textures/status`:** state (`running`, `done`, `finished with failures`), done/failed counts and a log per file: field, file, result, importSeconds, saveSeconds, guid, asset name and error.
+- **GET** lists each slot as `{guid, name, imported}`, or `"default"` when the slot is unset; `imported` is the source file of an import made this game session. It also includes the last job's status.
+- **Unverified in game:** whether the native importer is safe off the main thread. If worker-thread items fail, rerun with `"worker": false`.
 - **Settings and tiling:** legacy texture format, tiling and the ExtraN numbers stay in `/map/settings terrainEdit`.
 - **Unverified in game:** that the imported asset is packed with the saved map like a picker import. The same code path suggests it is.
 
