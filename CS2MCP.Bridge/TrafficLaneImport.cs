@@ -42,6 +42,7 @@ namespace CS2MCP
             public bool IsEnd;
             public float3[] Samples; // centre line from the node outward
             public float[] Distance;  // arc length of each sample from the node
+            public Entity ExtendedThrough; // 0.9.30: the continuing edge appended to a short stub
         }
 
         private sealed class Cs2Lane
@@ -220,6 +221,21 @@ namespace CS2MCP
                 }
 
                 List<EdgeAtNode> edges = CollectEdges(em, node);
+                if (edges.Count == 2 && IsStraightIdentity(nodeDto))
+                {
+                    const string same = "a straight two-edge node whose TM:PE connections are all lane i -> lane i (the game's default); nothing to write";
+                    foreach (TmpeConnectionDto c in nodeDto.connections)
+                    {
+                        connectionResults.Add(Result(c.id, nodeDto, "notNeeded", same));
+                    }
+                    foreach (TmpeArrowDto a in nodeDto.arrows)
+                    {
+                        Dictionary<string, object> r = Result(a.id, nodeDto, "notNeeded", same);
+                        r["arrows"] = a.arrows;
+                        arrowResults.Add(r);
+                    }
+                    continue;
+                }
                 var plan = new NodePlan { Dto = nodeDto, Node = node, Position = EffectivePosition(edges, position) };
                 PlanConnections(em, plan, edges, options, connectionResults);
                 PlanArrows(em, plan, edges, options, arrowResults);
@@ -597,6 +613,7 @@ namespace CS2MCP
                     cs1Prefab = r.prefab,
                     cs1LaneCount = (r as TmpeLaneEndDto)?.laneCount,
                     cs2Edge = edge != null ? Id(edge.Edge) : null,
+                    viaStubTo = edge != null && edge.ExtendedThrough != Entity.Null ? Id(edge.ExtendedThrough) : null,
                     distance = Round(d),
                     cs2LanesIntoNode = into?.Select(l => l.Index).ToArray(),
                     cs2LanesOutOfNode = outOf?.Select(l => l.Index).ToArray(),
@@ -863,7 +880,14 @@ namespace CS2MCP
                 nodeSide = incoming ? laneData.m_EndNode : laneData.m_StartNode;
                 if (!nodeSide.OwnerEquals(new PathNode(edge.Edge, 0)))
                 {
-                    continue;
+                    // 0.9.30: on straight pass-through nodes the node-side path node can belong to the
+                    // neighbouring edge; the far end of the piece still carries this edge's composition index.
+                    PathNode farSide = incoming ? laneData.m_StartNode : laneData.m_EndNode;
+                    if (!farSide.OwnerEquals(new PathNode(edge.Edge, 0)))
+                    {
+                        continue;
+                    }
+                    nodeSide = farSide;
                 }
                 float3 end = incoming ? b.d : b.a;
                 float2 heading = math.normalizesafe(incoming ? (b.d - b.c).xz : (b.b - b.a).xz);
@@ -927,6 +951,65 @@ namespace CS2MCP
             return result;
         }
 
+        /// <summary>
+        /// 0.9.30: an edge shorter than 15 m (A-v7: 4-8 m stubs of the neighbouring prefab where the import
+        /// put the prefab change a few metres off the CS1 node) gets the shape of the edge that continues
+        /// it straight on at its far node (degree 2, |angle| &lt; 30 deg) appended, so probes 20 m out still
+        /// find the stub as the edge in that direction. Lanes and Traffic data stay on the stub itself.
+        /// </summary>
+        private static void ExtendStub(EntityManager em, EdgeAtNode edge, Entity farNode)
+        {
+            float length = edge.Distance[edge.Distance.Length - 1];
+            if (length >= 15f || !em.HasBuffer<ConnectedEdge>(farNode))
+            {
+                return;
+            }
+            DynamicBuffer<ConnectedEdge> connected = em.GetBuffer<ConnectedEdge>(farNode, true);
+            if (connected.Length != 2)
+            {
+                return;
+            }
+            float2 heading = math.normalizesafe(edge.Samples[edge.Samples.Length - 1].xz - edge.Samples[0].xz);
+            for (int i = 0; i < connected.Length; i++)
+            {
+                Entity next = connected[i].m_Edge;
+                if (next == edge.Edge || !em.HasComponent<Curve>(next) || !em.HasComponent<Edge>(next))
+                {
+                    continue;
+                }
+                Edge nextData = em.GetComponentData<Edge>(next);
+                bool fromStart = nextData.m_Start == farNode;
+                if (!fromStart && nextData.m_End != farNode)
+                {
+                    continue;
+                }
+                Bezier4x3 b = em.GetComponentData<Curve>(next).m_Bezier;
+                const int n = 64;
+                var extra = new float3[n];
+                for (int s = 1; s <= n; s++)
+                {
+                    float t = (float)s / n;
+                    extra[s - 1] = MathUtils.Position(b, fromStart ? t : 1f - t);
+                }
+                float2 nextHeading = math.normalizesafe(extra[math.min(8, n - 1)].xz - edge.Samples[edge.Samples.Length - 1].xz);
+                if (math.dot(heading, nextHeading) < 0.866f)
+                {
+                    return;
+                }
+                var samples = new List<float3>(edge.Samples);
+                var distance = new List<float>(edge.Distance);
+                foreach (float3 p in extra)
+                {
+                    distance.Add(distance[distance.Count - 1] + math.distance(p.xz, samples[samples.Count - 1].xz));
+                    samples.Add(p);
+                }
+                edge.Samples = samples.ToArray();
+                edge.Distance = distance.ToArray();
+                edge.ExtendedThrough = next;
+                return;
+            }
+        }
+
         private static List<EdgeAtNode> CollectEdges(EntityManager em, Entity node)
         {
             var edges = new List<EdgeAtNode>();
@@ -954,7 +1037,9 @@ namespace CS2MCP
                     samples[s] = MathUtils.Position(b, isEnd ? 1f - t : t);
                     distance[s] = s == 0 ? 0 : distance[s - 1] + math.distance(samples[s].xz, samples[s - 1].xz);
                 }
-                edges.Add(new EdgeAtNode { Edge = e, IsEnd = isEnd, Samples = samples, Distance = distance });
+                var edgeAtNode = new EdgeAtNode { Edge = e, IsEnd = isEnd, Samples = samples, Distance = distance };
+                ExtendStub(em, edgeAtNode, isEnd ? edgeData.m_Start : edgeData.m_End);
+                edges.Add(edgeAtNode);
             }
             return edges;
         }

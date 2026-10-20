@@ -689,3 +689,30 @@ All test entities were removed afterwards.
 **`/import/network` folded courses:**
 - **The problem:** when the game folds a course into an **older** neighbour segment, and re-splits it on its grid, the segment keeps its entity. It is then neither new in the batch nor recorded by this import, so the course was reported failed although it is there. Examples: A-v6 gravel `e23168_0`, `e31265_0`, `e31665_0`, `e36006_0`.
 - **The fix:** a second pass checks the course's sample points against **all** live segments of the prefab. If they are covered, the edge is `merged` with "folded by the game into existing segment …". Those older segments are not added to this import's undo.
+
+## Round 30 (0.9.30, offline after A-v7)
+
+**A-v7 TM:PE:** 40 created; after reload, Traffic found "0 affected nodes of 14". The 0.9.28 lane-index fix is confirmed. Remaining skips, classified against `out/tmpe-import-report.json` and `live-graph-20261020-211001-end.json`:
+- **Lane-count mismatch "CS2 has 0" (8 connections: n7849, n12950, n13892 on CS1 segments 20430, 22842, 35734).**
+  - **Data:** degree-2 straight nodes whose TM:PE data is pure lane i → i, i.e. the default.
+  - **0 lanes:** the node-side path nodes there belong to the neighbouring edge.
+  - **Matcher fixed (bridge):** these nodes are now `notNeeded`, and the lane index falls back to the far end of the piece.
+- **"No edge … nearest 20 m off" (6 connections: n11611/34976, n14407/12566, n18884/18923). Converter topology.** In each case the edge leaving the CS2 node in the CS1 direction is a **4–8 m stub of the neighbouring prefab**, and the real segment starts at the next node:
+  - 65213 Highway 2-lane 4.8 m → Medium Road 96404;
+  - 64403 1-lane 8.3 m → 2-lane 64890;
+  - 62606 1-lane 4.2 m → BXP Truss Arch 56973.
+
+  The prefab change lands a few metres off the CS1 node, which also makes a short lane pinch in game. Fix in the converter: put the change node on the CS1 node. The matcher now looks through stubs under 15 m (selfCheck `viaStubTo`), so the edge is found; the lane counts then come from the stub.
+
+**Interchange at (2995, 820) (owner report): never imported.**
+- **CS1 export** (`DakotaExport/…20261019-063123.json`): 48 segments within 350 m.
+- **Import files** (import-all, bridges, bridges-fixed, gaps): **34 of them have no import edge**, by `cs1_segment` or within 3 m. They are 3L, 2L and 4L interstate and 1L ramps.
+- **A-v7 graph:** all 15 import edges there are live.
+
+So the converter dropped them; it is not a game removal. Check its stub and dead-end removal (round 12, `--keep-highway-stubs`).
+
+**Terrain paint:**
+- **Feather:** new `feather` option, strength ramping from 0 at the outline (A-v7's hard edges came from full-strength stamps reaching the outline).
+- **Probe:** `POST /debug/terrain-paint/probe` measures how stamps combine and how materials are encoded, for the next run.
+
+**`GET/POST /graph/diff`:** import set against the live graph, giving missing and extra segments per 500 m cell.

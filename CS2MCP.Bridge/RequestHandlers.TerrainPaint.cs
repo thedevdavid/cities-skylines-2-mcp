@@ -33,6 +33,8 @@ namespace CS2MCP
             public string brush;
             public float? strength;
             public float? softEdge;
+            /// <summary>0.9.30: metres over which strength ramps from 0 at the outline to full inside.</summary>
+            public float? feather;
             public float? minStamp;
             public int? maxStamps;
         }
@@ -44,6 +46,7 @@ namespace CS2MCP
             public float[][] polygon;
             public float? strength;
             public float? softEdge;
+            public float? feather;
         }
 
         public sealed class TerrainPaintStrokeDto
@@ -240,6 +243,7 @@ namespace CS2MCP
 
             float defaultStrength = math.clamp(options.strength ?? 1f, 0f, 1f);
             float defaultSoft = math.max(0f, options.softEdge ?? 0f);
+            float defaultFeather = math.max(0f, options.feather ?? 0f);
             float minStamp = math.max(1f, options.minStamp ?? 4f);
             int maxStamps = options.maxStamps ?? 250000;
             var problems = new List<string>();
@@ -265,7 +269,7 @@ namespace CS2MCP
                         continue;
                     }
                     var stamps = new List<Stamp>();
-                    FillPolygon(ring, math.max(0f, poly.softEdge ?? defaultSoft), minStamp, math.clamp(poly.strength ?? defaultStrength, 0f, 1f), stamps);
+                    FillPolygon(ring, math.max(0f, poly.softEdge ?? defaultSoft), math.max(0f, poly.feather ?? defaultFeather), minStamp, math.clamp(poly.strength ?? defaultStrength, 0f, 1f), stamps);
                     total += stamps.Count;
                     plan.Add((poly.id, material, stamps));
                 }
@@ -395,6 +399,128 @@ namespace CS2MCP
             return BridgeResponse.Json(new { undone = target.Id, name = target.Name, left = m_PaintUndo.Count });
         }
 
+        public sealed class PaintProbeDto
+        {
+            public float x;
+            public float z;
+            public string material;
+            public string brush;
+            public float radius = 20f;
+            public float[] strengths = { 0.4f, 0.4f, 0.4f, 1f };
+        }
+
+        /// <summary>
+        /// POST /debug/terrain-paint/probe: stamps one spot with the given strengths in turn, reads the raw
+        /// user-splatmap texel (RG8) at the centre and 0.75 x radius out after each stamp, then restores the
+        /// splatmaps. Answers how stamps of strength &lt; 1 combine and how the four materials are encoded.
+        /// </summary>
+        private BridgeResponse TerrainPaintProbe(BridgeRequest request)
+        {
+            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
+            {
+                return error;
+            }
+            PaintProbeDto dto;
+            try
+            {
+                dto = JsonConvert.DeserializeObject<PaintProbeDto>(request.Body ?? "{}") ?? new PaintProbeDto();
+            }
+            catch (Exception e)
+            {
+                return BridgeResponse.Error(400, $"invalid JSON: {e.Message}");
+            }
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            Entity material = Entity.Null;
+            foreach (PrefabBase p in AllPrefabsOf(typeof(TerraformingPrefab)))
+            {
+                var t = (TerraformingPrefab)p;
+                if (t.m_Target != TerraformingTarget.Material || !t.TryGet(out TerrainMaterialProperties props))
+                {
+                    continue;
+                }
+                bool match = string.Equals(t.name, dto.material, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(props.m_Type.ToString(), dto.material, StringComparison.OrdinalIgnoreCase)
+                    || Array.Exists(MaterialAliases(props.m_Type), a => string.Equals(a, dto.material, StringComparison.OrdinalIgnoreCase));
+                if (match)
+                {
+                    prefabSystem.TryGetEntity(t, out material);
+                }
+            }
+            BrushPrefab brush = null;
+            foreach (PrefabBase p in AllPrefabsOf(typeof(BrushPrefab)))
+            {
+                var b = (BrushPrefab)p;
+                if (string.IsNullOrEmpty(dto.brush) ? (brush == null || b.m_Priority < brush.m_Priority) : string.Equals(b.name, dto.brush, StringComparison.OrdinalIgnoreCase))
+                {
+                    brush = b;
+                }
+            }
+            if (material == Entity.Null || brush == null || !prefabSystem.TryGetEntity(brush, out Entity brushEntity))
+            {
+                return BridgeResponse.Error(400, "provide {x, z, material, brush?, radius?, strengths?} with a material and brush from GET /map/terrain-materials");
+            }
+            TerrainMaterialSystem materialSystem = World.GetOrCreateSystemManaged<TerrainMaterialSystem>();
+            TerrainSystem terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
+            RenderTexture before = Snapshot(materialSystem.UserSplatmap);
+            RenderTexture beforeWorld = Snapshot(materialSystem.UserSplatmapWorld);
+            var centre = new float2(dto.x, dto.z);
+            var edgePoint = centre + new float2(dto.radius * 0.75f, 0f);
+            var steps = new List<object> { new { step = "before", centre = ReadTexel(materialSystem.UserSplatmap, terrain, centre), edge = ReadTexel(materialSystem.UserSplatmap, terrain, edgePoint) } };
+            foreach (float strength in dto.strengths ?? new float[0])
+            {
+                materialSystem.ApplyBrush(new Brush
+                {
+                    m_Tool = material,
+                    m_Position = new float3(centre.x, 0f, centre.y),
+                    m_Target = new float3(centre.x, 0f, centre.y),
+                    m_Start = new float3(centre.x, 0f, centre.y),
+                    m_Size = dto.radius * 2f,
+                    m_Strength = strength,
+                    m_Opacity = 1f,
+                }, brushEntity);
+                steps.Add(new { step = $"strength {strength}", centre = ReadTexel(materialSystem.UserSplatmap, terrain, centre), edge = ReadTexel(materialSystem.UserSplatmap, terrain, edgePoint) });
+            }
+            Restore(before, materialSystem.UserSplatmap);
+            Restore(beforeWorld, materialSystem.UserSplatmapWorld);
+            var whole = new Bounds2(terrain.worldOffset, terrain.worldOffset + terrain.worldSize);
+            terrain.OnAreaChanged(in whole);
+            materialSystem.ForceUpdateWholeSplatmap();
+            ReleaseUndo(new PaintUndo { Playable = before, World = beforeWorld });
+            return BridgeResponse.Json(new
+            {
+                brush = brush.name,
+                material = prefabSystem.GetPrefab<PrefabBase>(material).name,
+                steps,
+                note = "raw RG8 texel values (0..255) of the playable user splatmap; the splatmaps were restored afterwards",
+            });
+        }
+
+        private static object ReadTexel(Texture texture, TerrainSystem terrain, float2 world)
+        {
+            if (!(texture is RenderTexture rt) || !rt.IsCreated())
+            {
+                return null;
+            }
+            float2 uv = (world - terrain.playableOffset) / terrain.playableArea;
+            int x = math.clamp((int)(uv.x * rt.width), 0, rt.width - 1);
+            int y = math.clamp((int)(uv.y * rt.height), 0, rt.height - 1);
+            RenderTexture active = RenderTexture.active;
+            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            try
+            {
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(x, y, 1, 1), 0, 0);
+                tex.Apply();
+                Color32 c = tex.GetPixel(0, 0);
+                return new { x, y, r = c.r, g = c.g };
+            }
+            finally
+            {
+                RenderTexture.active = active;
+                UnityEngine.Object.Destroy(tex);
+            }
+        }
+
         private static RenderTexture Snapshot(Texture source)
         {
             if (!(source is RenderTexture rt) || !rt.IsCreated())
@@ -444,7 +570,7 @@ namespace CS2MCP
         /// skipped when outside and that far away, and split otherwise, down to minStamp; edge cells
         /// are stamped with radius max(softEdge, 0.75 x side) when their centre is inside.
         /// </summary>
-        private static void FillPolygon(float2[] ring, float softEdge, float minStamp, float strength, List<Stamp> stamps)
+        private static void FillPolygon(float2[] ring, float softEdge, float feather, float minStamp, float strength, List<Stamp> stamps)
         {
             float2 min = ring[0], max = ring[0];
             foreach (float2 p in ring)
@@ -457,17 +583,17 @@ namespace CS2MCP
             {
                 for (float z = min.y; z < max.y + top; z += top)
                 {
-                    Cover(ring, new float2(x + top * 0.5f, z + top * 0.5f), top, softEdge, minStamp, strength, stamps);
+                    Cover(ring, new float2(x + top * 0.5f, z + top * 0.5f), top, softEdge, feather, minStamp, strength, stamps);
                 }
             }
         }
 
-        private static void Cover(float2[] ring, float2 centre, float side, float softEdge, float minStamp, float strength, List<Stamp> stamps)
+        private static void Cover(float2[] ring, float2 centre, float side, float softEdge, float feather, float minStamp, float strength, List<Stamp> stamps)
         {
             bool inside = PointInRing(ring, centre);
             float edge = DistanceToRing(ring, centre);
             float reach = side * 0.75f;
-            if (inside && edge >= reach)
+            if (inside && edge >= reach + feather)
             {
                 stamps.Add(new Stamp { Centre = centre, Radius = reach, Strength = strength });
                 return;
@@ -480,15 +606,21 @@ namespace CS2MCP
             {
                 if (inside)
                 {
-                    stamps.Add(new Stamp { Centre = centre, Radius = math.max(softEdge, reach), Strength = strength });
+                    // Feather band: strength ramps with the distance inside the outline (no spill outward);
+                    // without feather the edge stamps may spill softEdge metres outward at full strength.
+                    float ramp = feather > 0f ? math.saturate(edge / feather) : 1f;
+                    if (ramp * strength >= 0.01f)
+                    {
+                        stamps.Add(new Stamp { Centre = centre, Radius = feather > 0f ? reach : math.max(softEdge, reach), Strength = strength * ramp });
+                    }
                 }
                 return;
             }
             float half = side * 0.5f;
-            Cover(ring, centre + new float2(-half, -half) * 0.5f, half, softEdge, minStamp, strength, stamps);
-            Cover(ring, centre + new float2(half, -half) * 0.5f, half, softEdge, minStamp, strength, stamps);
-            Cover(ring, centre + new float2(-half, half) * 0.5f, half, softEdge, minStamp, strength, stamps);
-            Cover(ring, centre + new float2(half, half) * 0.5f, half, softEdge, minStamp, strength, stamps);
+            Cover(ring, centre + new float2(-half, -half) * 0.5f, half, softEdge, feather, minStamp, strength, stamps);
+            Cover(ring, centre + new float2(half, -half) * 0.5f, half, softEdge, feather, minStamp, strength, stamps);
+            Cover(ring, centre + new float2(-half, half) * 0.5f, half, softEdge, feather, minStamp, strength, stamps);
+            Cover(ring, centre + new float2(half, half) * 0.5f, half, softEdge, feather, minStamp, strength, stamps);
         }
 
         private static bool PointInRing(float2[] ring, float2 p)

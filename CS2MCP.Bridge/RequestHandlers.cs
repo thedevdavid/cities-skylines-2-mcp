@@ -211,8 +211,12 @@ namespace CS2MCP
                     return TerrainMaterials();
                 case "/import/terrain-paint":
                     return TerrainPaint(request);
+                case "/debug/terrain-paint/probe":
+                    return TerrainPaintProbe(request);
                 case "/import/terrain-paint/undo":
                     return TerrainPaintUndo(request);
+                case "/graph/diff":
+                    return GraphDiff(request);
                 case "/net/count":
                     return NetCount();
                 case "/map/look/schema":

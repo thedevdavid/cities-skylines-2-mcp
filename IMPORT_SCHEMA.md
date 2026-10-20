@@ -428,6 +428,7 @@ Coverage is not read back, because the splatmap is a GPU texture.
 | `brush` | the brush with the lowest priority, which is the tools' default | Brush shape |
 | `strength` | 1.0 | Brush opacity per stamp, 0–1. Per-item `strength` overrides it. |
 | `softEdge` | 0 | Metres. Edge stamps get at least this radius, so the paint spills about that far past the outline. Per-polygon `softEdge` overrides it. |
+| `feather` | 0 | 0.9.30. Metres over which strength ramps from 0 at the outline to full inside, with no spill outward; per-polygon `feather` overrides it. Use this for soft edges. |
 | `minStamp` | 4 | Smallest stamp cell in metres. |
 | `maxStamps` | 250000 | Safety cap on the number of stamps. |
 
@@ -440,3 +441,18 @@ Coverage is not read back, because the splatmap is a GPU texture.
 **Unverified in game:**
 - how the paint kernel blends repeated stamps (strength 1 is expected to saturate);
 - whether a large stamp's soft brush texture leaves visible rings. Use a hard brush if so.
+
+**0.9.30, probe for stamp blending:** `POST /debug/terrain-paint/probe {x, z, material, brush?, radius?, strengths?}` stamps one spot with each strength in turn (default 0.4, 0.4, 0.4, 1). After every stamp it reads the raw RG8 texel at the centre and at 0.75 × radius, then restores the splatmaps. Run it once to learn whether strengths below 1 accumulate (0.4 three times → full?) and how the four materials are encoded in the two channels. An `accumulate: false` mode, capping at the item strength, depends on that answer.
+
+## Graph diff (`GET /graph/diff?body=<file>[,<file>]` or `POST /graph/diff`, 0.9.30)
+
+Compares import files (read from disk by the bridge) or an inline `{import: {nodes, edges}}` with the live network:
+- **`missing`:** import edges whose midpoint has no live segment of any prefab within `radius` (default 2 m), with the nearest live segment within 30 m.
+- **`extra`:** live segments of a prefab the import uses that have no import edge of that prefab within `radius` of their midpoint.
+
+Other parameters and output:
+- **Cell counts:** per 500 m cell (`cell`).
+- **Area filter:** `area` = `x,z,r` (GET) or `[x, z, r]` (POST).
+- **Owned segments:** `owned=true` includes them.
+
+POST body: `{paths: [...], radius, cell, area, owned, limit}`. Segments the game merged or re-split still count as present, because midpoints are tested against whole curves.
