@@ -85,6 +85,8 @@ namespace CS2MCP
             public bool? bypassValidation;
             /// <summary>Bridge-prefab checks: "error" (default, blocks), "warn", "off".</summary>
             public string bridgeRules;
+            /// <summary>0.9.33: allow edges of nets another prefab spawns as AuxiliaryNets (refused by default).</summary>
+            public bool? allowAuxiliaryNets;
         }
 
         public sealed class ImportRequestDto
@@ -257,6 +259,7 @@ namespace CS2MCP
             }
 
             var prefabs = NetPrefabsByName();
+            Dictionary<string, string> auxiliaryOwners = null;
             var edgeIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (ImportEdgeDto dto in body.edges)
             {
@@ -288,6 +291,15 @@ namespace CS2MCP
                 if (string.IsNullOrEmpty(dto.prefab) || !prefabs.TryGetValue(dto.prefab, out Entity prefabEntity))
                 {
                     problems.Add($"edge '{dto.id}': unknown network prefab '{dto.prefab}' (exact names via /prefabs?category=net&query=...)");
+                    continue;
+                }
+                auxiliaryOwners = auxiliaryOwners ?? AuxiliaryNetOwners();
+                if (options.allowAuxiliaryNets != true && auxiliaryOwners.TryGetValue(dto.prefab, out string auxOwner))
+                {
+                    // 0.9.33: A-v8 crashed natively (no managed stack) right after a standalone
+                    // "BXP Double Deck Suspension Bridge - Lower Highway" edge was built: that net is
+                    // the upper deck's AuxiliaryNets entry, which the upper deck spawns itself.
+                    problems.Add($"edge '{dto.id}': '{dto.prefab}' is an auxiliary net of '{auxOwner}' (spawned by that prefab, not placeable on its own); import '{auxOwner}' only, or set options.allowAuxiliaryNets");
                     continue;
                 }
                 float2[] control = null;
@@ -483,6 +495,32 @@ namespace CS2MCP
             {
                 job.Warnings.Add($"edge '{edgeId}': elevation {elevation:F2} at node '{job.Nodes[node].Id}' ignored; the node uses {job.Nodes[node].Elevation:F2}");
             }
+        }
+
+        /// <summary>Net prefab name -> name of a net prefab that lists it in its AuxiliaryNets.</summary>
+        private Dictionary<string, string> AuxiliaryNetOwners()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            using (NativeArray<Entity> entities = NetPrefabQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity entity in entities)
+                {
+                    PrefabBase prefab = prefabSystem.GetPrefab<PrefabBase>(entity);
+                    if (prefab == null || !prefab.TryGet(out AuxiliaryNets aux) || aux.m_AuxiliaryNets == null)
+                    {
+                        continue;
+                    }
+                    foreach (AuxiliaryNetInfo info in aux.m_AuxiliaryNets)
+                    {
+                        if (info?.m_Prefab != null && !result.ContainsKey(info.m_Prefab.name))
+                        {
+                            result[info.m_Prefab.name] = prefab.name;
+                        }
+                    }
+                }
+            }
+            return result;
         }
 
         private Dictionary<string, Entity> NetPrefabsByName()

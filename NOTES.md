@@ -740,3 +740,26 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 **Fix:**
 - POST is now a background job: a worker-thread import, one file at a time, plus `GET /map/terrain-textures/status` with the per-file log.
 - GET prints each slot's guid and asset name, or `default`.
+
+## Round 33 (0.9.33): A-v8 native crash in `detroit-test`
+
+**Crash:**
+- Player.log 16:11 shows "Native Crash Reporting … UNKNOWN while executing native code" with an empty managed stack.
+- There is no Crashes folder or dump under `%TEMP%\Colossal Order\Cities Skylines II`.
+- CS2MCP.log has nothing after 15:44.
+- So the cause is not proven: the crash came inside a Burst job or native code, during the step that built the combined option-2 and option-3 body.
+
+**Prefab evidence:** read from the BXP pack, `pdx_mods/92245_36/BridgeExpansionAssetPack.cok`.
+- **`BXP Double Deck Suspension Bridge - Highway`** has an `AuxiliaryNets` component. Its `m_Prefab` is CID `77f110c8a62ccb512739d5d58ae9803c`, which is `Double Deck Suspension Bridge - Lower Highway.Prefab.cid`.
+  - So the lower deck is spawned by the upper deck.
+  - The Lower Highway prefab has no `UIObject`, so it is not in the menu; its locale name is "… Lower Highway Lanes".
+  - The import placed it on its own, as a separate dead-end edge in the air, and also placed the upper deck, which spawns its own lower deck at the same spot. That overlap is the prime suspect.
+- **The same pattern, with an auxiliary-only partner,** exists in the Double Deck Subway and Train, the Golden Gate Subway and Train, and the ExtradosedBridge01 PedsBikes, Public Transport, Subway and Tram.
+- **`BXP Suspension Bridge - Highway Twoway - 6 Lanes`** (option 2) has no `AuxiliaryNets`. It is a plain non-fixed net, 192–448 m per edge.
+
+**Bridge:** `/import/network` now refuses auxiliary nets (`options.allowAuxiliaryNets` overrides).
+
+**Dry run at 16:2x:** the editor terrain was flat at 511.9 m because the rebuild had not loaded the heightmap yet. Both bodies therefore failed only on `bridge.lowElevation` (deck 148 m).
+- **Option 2:** each 362 m edge is one piece within 192–448.
+- **Option 3:** the upper deck splits into 3 × 325 m fixed spans.
+- **Rerun** both dry runs on the rebuilt terrain.
