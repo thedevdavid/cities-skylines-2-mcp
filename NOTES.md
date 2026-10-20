@@ -551,3 +551,38 @@ So "segments built without Anarchy's protection get removed later" has no mechan
 3. **After 2 minutes of editor time** with no input: `GET /net/count` must equal step 1, per prefab.
 4. **After save, then load (a name without a leading space):** `GET /net/count` must equal step 1 again.
 5. **On a mismatch at 3 or 4:** pull `/graph/export` and diff it against the import set with `tools/live-analysis.mjs`.
+
+## Round 25 (0.9.25, live on A-v5): dam check, level-course fix, suspension bridge
+
+**The A-v5 dam did build:** `imp-20261020-140910-6`, reported "merged 1".
+- **Owner:** plant `HydroelectricPowerPlant01` 57553:11 at (1484.1, 173.6, 4675.8), facing −99°, owns 11 `Hydroelectric_Power_Plant_01 Dam` segments from (1440, 4673) to (1741, 4720).
+- **Why it looked missing:** owned segments are absent from `/graph/export` (use `?owned=true`), and `/net/count` lists them only under `ownedSegments`.
+- **Plant sub-nets:** a High-voltage Marker 57556:11 at (1465.9, 4649.7), plus the dam nodes.
+- **Spans:** the course was cut exactly as the prefab defines and as the dry run predicted. The prefab's `/prefabs/info` `bridge` block shows them: abutment 64 m (straight), spillway 9.6–22.4 m × 1…∞, centre 32 m, spillway again, abutment 64 m (straight). At 300 m that is 64 + 4×18 + 32 + 4×18 + 64.
+- **The plant** is the course-start object at local (4, 0, 44). `HydroelectricPowerPlant01_End` is the course-end object at (4, 0, −44).
+- **Water flow:** `FlowLeft`, buildStyle Elevated, segmentLength 16, elevationOnWater 10, flags include `SubOwner`, `NoCurveSplit`, `FlattenTerrain`, `ClipTerrain` and `ExclusiveGround`.
+
+**Defect: the spans did not share nodes.**
+- **Symptom:** each of the 4 span boundaries had two nodes at the same x/z, 1.8 m apart in height.
+- **Elevation is not the cause.** A test dam on flat ground at (−3150…−2850, −6200), with elevation 0 at both ends, showed the same gaps. It was undone and its plant demolished; the counts are back to 3254 top-level and 15 owned.
+- **Cause:** the importer bends every course to the terrain (`NetUtils.AdjustPosition`) plus its elevations. `CourseSplitSystem` lays the straight fixed spans along that curve, but samples the curvable spans from the course ends, so the boundary heights differ and `GenerateNodesSystem` makes two nodes.
+- **What the net tool does:** for a max-slope-0 prefab it clamps the elevation to the prefab range (0..0) and sets every control point to the start height, giving a level straight course.
+- **0.9.25** does the same for every prefab with `m_MaxSlopeSteepness == 0`: end y = start y (unless the end is attached), a straight line, elevation 0 at both ends, and control points ignored with a warning. This needs a game restart. **Unverified:** the next build must show the 10 inner span nodes as degree-2.
+
+**Two problems with the site itself:**
+- **No water flows across the dam line** (flow weight 0). The abutments stand 7.2 m and 3.5 m above the terrain, on dry ground east of the river channel (x ≈ 1380–1440). A dam that spans no flowing water produces no power.
+- **The `auto` orientation is wrong for this river.** With no flow, `auto` kept a → b (west → east), so the plant sits at the west end. For a north → south river (+z = north) and a `FlowLeft` prefab, the course must start at the east abutment, i.e. `flow: "invert"` or a/b swapped. Otherwise `WaterPowered` counts the flow as negative.
+
+**BXP SuspensionBridge03 on A-v5:** 4 segments of 168.1 + 320.1 + 320.1 + 167.9 m, connected through degree-2 nodes.
+- **Tower nodes:** (1339, 153.6, −3752.9) and (1726, 153.6, −3243.0), 168 m in from each end, where the prefab's towers stand.
+- **Middle node:** (1532.5, 157.8, −3498.0), mid-span.
+- **End nodes:** the 3-way splits (1237.4, −3886.8) and (1827.5, −3109.4).
+- **Towers:** they are prefab sub-objects and cannot be listed in the editor (`/city/objects` is city-only), so they still need a look in game.
+
+**Rebuilding the A-v5 dam after the restart:**
+1. `POST /build/demolish?index=57553&version=11&force=true` removes the plant and its owned dam segments. Undo cannot be used, because later network imports exist.
+2. Move the abutments so the line crosses the river, at the crest height on both valley sides (`dam.elevation` ≈ 0).
+3. Import one edge with `flow: "invert"` (or `auto` once water flows).
+4. Check `/entity/subnets?index=<plant>` for degree-2 inner dam nodes.
+
+**Side finding:** two `TransformerStation01` (163022:1 and 135364:17) stand at the same spot (1594.28, 4549.11), probably the substation imported twice. Delete one.

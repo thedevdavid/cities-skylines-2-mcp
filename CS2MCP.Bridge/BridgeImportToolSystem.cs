@@ -1091,12 +1091,38 @@ namespace CS2MCP
             {
                 bezier = NetUtils.StraightCurve(start, end);
             }
-            Curve raw = new Curve { m_Bezier = bezier, m_Length = MathUtils.Length(bezier) };
-            bezier = NetUtils.AdjustPosition(raw, startAttached, false, endAttached, ref heightData).m_Bezier;
-            bezier.b.y += math.lerp(startElevation, endElevation, 1f / 3f);
-            bezier.c.y += math.lerp(startElevation, endElevation, 2f / 3f);
-            bezier.a = start;
-            bezier.d = end;
+            bool level = EntityManager.HasComponent<NetGeometryData>(edge.Prefab)
+                && EntityManager.GetComponentData<NetGeometryData>(edge.Prefab).m_MaxSlopeSteepness == 0f;
+            if (level)
+            {
+                // Max-slope-0 nets (the hydro dam): NetToolSystem.CreateContinuousCurve /
+                // CreateStraightLine clamp the elevation to the prefab range (0..0) and then
+                // SetHeight every control point to the start height, so the course is a level
+                // straight line at the start's y with elevation 0 at both ends. A course that
+                // follows the terrain instead makes CourseSplitSystem lay the straight fixed
+                // spans along the curve but sample the others from the ends, and the spans
+                // stop sharing nodes (0.9.24 built the A-v5 dam in five unconnected pieces).
+                if (!endAttached)
+                {
+                    end.y = start.y;
+                }
+                bezier = NetUtils.StraightCurve(start, end);
+                if (edge.Control != null && m_Job.Warnings.Count < 1000)
+                {
+                    m_Job.Warnings.Add($"edge '{edge.Id}': control points ignored; {edge.PrefabName} has max slope 0 and is built as a level straight line, as the net tool does");
+                }
+                startElevation = 0f;
+                endElevation = 0f;
+            }
+            else
+            {
+                Curve raw = new Curve { m_Bezier = bezier, m_Length = MathUtils.Length(bezier) };
+                bezier = NetUtils.AdjustPosition(raw, startAttached, false, endAttached, ref heightData).m_Bezier;
+                bezier.b.y += math.lerp(startElevation, endElevation, 1f / 3f);
+                bezier.c.y += math.lerp(startElevation, endElevation, 2f / 3f);
+                bezier.a = start;
+                bezier.d = end;
+            }
 
             NetCourse course = default;
             course.m_Curve = bezier;
