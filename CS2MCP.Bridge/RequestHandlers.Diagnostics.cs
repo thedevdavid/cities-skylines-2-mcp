@@ -107,7 +107,8 @@ namespace CS2MCP
             // Inspect the panel's own cache before any reset: a stale or half-written entry
             // there keeps it throwing even when every object is fine.
             object panelCache = InspectHierarchyCache(prefabCount);
-            string reset = post ? ResetEditorHierarchy() : null;
+            string grown = post ? EnsureHierarchyCacheCapacity(force: true) : null;
+            string reset = post ? grown ?? ResetEditorHierarchy() : null;
 
             return BridgeResponse.Json(new
             {
@@ -157,6 +158,7 @@ namespace CS2MCP
                         readable = true,
                         entries = entries.Length,
                         invalidEntries = bad.Count,
+                        capacity = cache.Capacity,
                         invalidIndices = bad.Count > 20 ? bad.GetRange(0, 20) : bad,
                         stuck = bad.Count > 0,
                         note = bad.Count > 0
@@ -168,6 +170,58 @@ namespace CS2MCP
             catch (Exception e)
             {
                 return new { readable = false, error = $"{e.GetType().Name}: {e.Message}" };
+            }
+        }
+
+        private const int kHierarchyCacheCapacity = 8192;
+        private int m_HierarchyCheckFrame;
+
+        /// <summary>
+        /// Works around a vanilla bug: EditorHierarchyUISystem.m_PrefabsCache is created with
+        /// capacity 128 and filled by ObjectHierarchyJob through a ParallelWriter, which cannot
+        /// grow. With more than about 128 distinct prefabs among top-level objects and Workspace
+        /// prefabs it overflows. The release build strips the "HashMap is full" check, so
+        /// AllocEntry returns -1 and writes next[-1] = -1, which is the last key slot. That
+        /// leaves a PrefabData with m_Index -1 in the cache, and the unchecked GetPrefab in
+        /// UpdateFilteredHierarchy throws ArgumentOutOfRangeException every frame. Growing the
+        /// set once (it is persistent and survives map loads) fixes it for the session.
+        /// Called from BridgeSystem about once a second.
+        /// </summary>
+        internal string EnsureHierarchyCacheCapacity(bool force = false)
+        {
+            if (!force && ++m_HierarchyCheckFrame % 60 != 0)
+            {
+                return null;
+            }
+            try
+            {
+                EditorHierarchyUISystem hierarchy = World.GetExistingSystemManaged<EditorHierarchyUISystem>();
+                if (hierarchy == null)
+                {
+                    return null;
+                }
+                FieldInfo field = typeof(EditorHierarchyUISystem).GetField("m_PrefabsCache", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (!(field?.GetValue(hierarchy) is NativeParallelHashSet<PrefabData> cache) || !cache.IsCreated
+                    || cache.Capacity >= kHierarchyCacheCapacity)
+                {
+                    return null;
+                }
+                int old = cache.Capacity;
+                // The hierarchy job may still be writing into the set.
+                EntityManager.CompleteAllTrackedJobs();
+                cache.Clear();
+                cache.Capacity = kHierarchyCacheCapacity;
+                field.SetValue(hierarchy, cache);
+                string reset = ResetEditorHierarchy();
+                string message = $"Workspace hierarchy prefab cache grown from {old} to {kHierarchyCacheCapacity} (vanilla overflow fix); {reset}";
+                Mod.Log.Info(message);
+                return message;
+            }
+            catch (Exception e)
+            {
+                m_HierarchyCheckFrame = int.MinValue / 2; // stop retrying every second after a failure
+                Mod.Log.Warn($"hierarchy cache grow failed: {e}");
+                return $"grow failed: {e.GetType().Name}: {e.Message}";
             }
         }
 

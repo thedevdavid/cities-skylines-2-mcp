@@ -39,6 +39,20 @@ namespace CS2MCP
             public bool? bypassValidation;
             public string report;
             public int? settleFrames;
+            public GroundingDto grounding;
+        }
+
+        /// <summary>Height rule for objects given without y (kinds object and plant).</summary>
+        public sealed class GroundingDto
+        {
+            /// <summary>"boundsMin": mesh bottom on the terrain; "pivot": pivot on the terrain (the game's default).</summary>
+            public string mode;
+            /// <summary>Fraction of the mesh height sunk below that (default 0).</summary>
+            public float? sink;
+            /// <summary>Lower further by terrain slope × half footprint, so the downhill side does not float.</summary>
+            public bool? slopeSink;
+            /// <summary>Upper limit on the lift above the terrain in boundsMin mode, in metres (default none).</summary>
+            public float? maxLift;
         }
 
         public sealed class ObjectImportDto
@@ -162,6 +176,15 @@ namespace CS2MCP
             var unknownPrefabs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var ids = new HashSet<string>(StringComparer.Ordinal);
             var perKind = new Dictionary<string, int>();
+            int grounded = 0;
+            if (options.grounding != null)
+            {
+                string mode = (options.grounding.mode ?? "boundsMin").Trim();
+                if (!string.Equals(mode, "boundsMin", StringComparison.OrdinalIgnoreCase) && !string.Equals(mode, "pivot", StringComparison.OrdinalIgnoreCase))
+                {
+                    return BridgeResponse.Error(400, "options.grounding.mode must be boundsMin or pivot");
+                }
+            }
             foreach (ObjectDto dto in body.objects)
             {
                 if (dto == null || string.IsNullOrEmpty(dto.id) || !ids.Add(dto.id))
@@ -223,9 +246,15 @@ namespace CS2MCP
                     }
                     ground = TerrainUtils.SampleHeight(ref heightData, position);
                 }
-                position.y = dto.y ?? ground;
+                float? y = dto.y;
+                if (!y.HasValue && options.grounding != null && (obj.Kind == "object" || obj.Kind == "plant"))
+                {
+                    y = GroundedHeight(prefabEntity, position, ground, options.grounding, ref heightData);
+                    grounded++;
+                }
+                position.y = y ?? ground;
                 obj.Position = position;
-                obj.Elevation = dto.y.HasValue ? math.max(0f, dto.y.Value - ground) : 0f;
+                obj.Elevation = y.HasValue ? math.max(0f, y.Value - ground) : 0f;
                 obj.Rotation = quaternion.RotateY(math.radians(rotation));
                 if (!TryParseAge(dto.age, out obj.Age))
                 {
@@ -279,6 +308,7 @@ namespace CS2MCP
                     objects = job.Objects.Count,
                     prefabsResolved = CountPrefabs(job),
                     perKind,
+                    grounded,
                     batchSize = job.BatchSize,
                     warningCount = job.Warnings.Count,
                     warnings = job.Warnings.Count > 200 ? job.Warnings.GetRange(0, 200) : job.Warnings,
@@ -323,6 +353,44 @@ namespace CS2MCP
         private BridgeResponse ObjectsStatus()
         {
             return BridgeResponse.Json(World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().Status());
+        }
+
+        /// <summary>
+        /// options.grounding: y for an object without one. boundsMin puts the mesh bottom
+        /// (ObjectGeometryData.m_Bounds.min.y below the pivot) on the terrain, pivot keeps the
+        /// pivot there; both then sink by sink × mesh height and, with slopeSink, by the
+        /// terrain slope × half the larger footprint side.
+        /// </summary>
+        private float GroundedHeight(Entity prefab, float3 position, float ground, GroundingDto grounding, ref TerrainHeightData heightData)
+        {
+            if (!EntityManager.HasComponent<ObjectGeometryData>(prefab))
+            {
+                return ground;
+            }
+            Bounds3 bounds = EntityManager.GetComponentData<ObjectGeometryData>(prefab).m_Bounds;
+            float height = math.max(0f, bounds.max.y - bounds.min.y);
+            bool boundsMin = !string.Equals((grounding.mode ?? "boundsMin").Trim(), "pivot", StringComparison.OrdinalIgnoreCase);
+            float lift = boundsMin ? math.max(0f, -bounds.min.y) : 0f;
+            if (grounding.maxLift.HasValue)
+            {
+                lift = math.min(lift, math.max(0f, grounding.maxLift.Value));
+            }
+            float y = ground + lift - math.max(0f, grounding.sink ?? 0f) * height;
+            if (grounding.slopeSink == true)
+            {
+                float half = 0.5f * math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
+                if (half > 0.01f)
+                {
+                    float step = math.max(1f, half);
+                    float dx = TerrainUtils.SampleHeight(ref heightData, position + new float3(step, 0f, 0f))
+                        - TerrainUtils.SampleHeight(ref heightData, position - new float3(step, 0f, 0f));
+                    float dz = TerrainUtils.SampleHeight(ref heightData, position + new float3(0f, 0f, step))
+                        - TerrainUtils.SampleHeight(ref heightData, position - new float3(0f, 0f, step));
+                    float slope = math.length(new float2(dx, dz)) / (2f * step);
+                    y -= slope * half;
+                }
+            }
+            return y;
         }
 
         private string KindOf(Entity prefab)

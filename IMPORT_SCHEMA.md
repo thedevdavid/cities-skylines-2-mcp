@@ -196,6 +196,23 @@ MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/object
 | `age` | Trees and bushes: `seedling` (AgeMask.Sapling, age 0), `sapling` (young/teen, AgeMask.Young, 0.175), `adult` (default, AgeMask.Mature, 0.425), `elderly` (AgeMask.Elderly, 0.775). Honoured in the editor too since 0.9.10 (the vanilla editor path picks a random age, 5 % of trees dead); never dead. Plants without `TreeData` (grass, ferns, flowers) ignore it. |
 | `net` | Outside connections: `road` or `rail` (see below); anything else (e.g. `air`, `ship`) places the prefab as a free border object. |
 
+**Grounding (`options.grounding`, 0.9.20).** For objects of kind `object` (props, rocks, cliffs, decals) and `plant` (grass, ferns, flowers) that have **no `y`**, the bridge computes the height from the prefab's `ObjectGeometryData.m_Bounds`. Objects with a `y`, as well as trees and buildings, are untouched. Without the option, the pivot sits on the terrain (the game's default). The converter should pass it for prop and object layers.
+
+```json
+"options": { "grounding": { "mode": "boundsMin", "sink": 0.15, "slopeSink": true } }
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `mode` | `boundsMin` | `boundsMin`: y = terrain(x,z) − bounds.min.y, so the mesh bottom sits on the terrain. `pivot`: y = terrain, so the pivot sits on the terrain and only `sink` and `slopeSink` apply. |
+| `sink` | 0 | Then lower y by sink × mesh height (bounds.max.y − bounds.min.y). |
+| `slopeSink` | false | Then lower y by the terrain slope × half the larger footprint side, so the downhill edge does not float. The slope is a central difference over ± max(1 m, half footprint) in x and z. |
+| `maxLift` | none | Cap, in metres, on the boundsMin lift (−bounds.min.y). |
+
+A y above the terrain becomes the object's elevation, as with an explicit `y`. The dry-run and the report give the `grounded` count.
+
+**Caveat (bounds in PREFAB_NAMES.md):** min.y is negative for every rock, cliff and ground-cover prefab, so boundsMin always lifts. For vanilla `Rock01–30` this is right: their pivot is at the mesh centre. Pack rocks are modelled with a buried skirt, 0.4–1.9 m for most; `CliffFreeStanding`, `CliffSideTall` and `CliffSlim` reach 105–131 m. boundsMin lifts that skirt into view. For those, use `pivot` mode, a `maxLift` of a few metres, or a separate import per family.
+
 Placement: each object becomes one definition from the bridge's port of the game's LineTool/ObjectTool definition job (`CreateDefinitions`), so buildings get their sub-objects, lots and terraforming, placeholder prefabs (`…Random01`) pick a variant, and trees get their age. Batches go through `ToolOutputBarrier` with the network importer's handshake (Clear → None → Apply, bisection on rejection). New objects are matched to ids by position among the batch's Temp objects (the game turns the Temp entity into the permanent one), so there are no full-map scans. `bypassValidation` sets `ToolSystem.ignoreErrors` for the import.
 
 Outside connections: **road and rail** connections are not objects you place. The game tags a net node on the terrain border with `Game.Net.OutsideConnection` and spawns the marker on it. For `kind: outsideConnection, net: road|rail` the bridge finds the nearest road (or train-track) node within 20 m of x,z. It reports `created` with the node entity if the game has made it an outside connection, or `failed` saying the net must end on the border; nothing is placed. **Airplane** (and, unverified, ship) connections are free objects: the bridge moves them onto the nearest terrain edge and, without `rotation`, faces them outward (+x edge 90°, -x 270°, +z 0°, -z 180°), as the editor's object tool does (`ObjectToolSystem.HandleWorldSize`). The game rejects them off the border (`NotOnBorder`).

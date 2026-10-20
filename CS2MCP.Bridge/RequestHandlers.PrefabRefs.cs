@@ -43,7 +43,8 @@ namespace CS2MCP
             using (EntityQuery query = EntityManager.CreateEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<PrefabData>() },
-                Options = EntityQueryOptions.IncludeDisabledEntities,
+                // Obsolete prefabs (index -1-j) have PrefabData disabled.
+                Options = EntityQueryOptions.IncludeDisabledEntities | EntityQueryOptions.IgnoreComponentEnabledState,
             }))
             using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp))
             {
@@ -216,7 +217,8 @@ namespace CS2MCP
             }
 
             object panelCache = InspectHierarchyCache(count);
-            string reset = fix ? ResetEditorHierarchy() : null;
+            string grown = fix ? EnsureHierarchyCacheCapacity(force: true) : null;
+            string reset = fix ? grown ?? ResetEditorHierarchy() : null;
             return BridgeResponse.Json(new
             {
                 loadedPrefabs = count,

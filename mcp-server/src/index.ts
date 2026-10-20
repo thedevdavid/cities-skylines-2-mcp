@@ -2028,6 +2028,15 @@ server.registerTool(
           bypassValidation: z.boolean().optional(),
           report: z.enum(["compact", "summary", "full"]).optional(),
           settleFrames: z.number().int().min(1).max(30).optional(),
+          grounding: z
+            .object({
+              mode: z.enum(["boundsMin", "pivot"]).optional(),
+              sink: z.number().min(0).max(1).optional(),
+              slopeSink: z.boolean().optional(),
+              maxLift: z.number().min(0).optional(),
+            })
+            .optional()
+            .describe("Height for objects/plants without y: boundsMin = mesh bottom on terrain, minus sink x height, minus slope x half footprint"),
         })
         .optional(),
       objects: z

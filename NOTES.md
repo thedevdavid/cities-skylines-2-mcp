@@ -449,4 +449,28 @@ I had ruled the name out because the loader resolved `%20dakota-A4-2048.cok`, fo
 
 `POST /debug/prefab-refs?fixWorkspace=true` drops Workspace entries with an invalid index and resets the panel.
 
-**Expectation:** the −1 is either an obsolete prefab held by a top-level object created after the scan, or a Workspace entry. The endpoint shows which. If it is a save-embedded climate or render settings prefab, the fix is on the map side: re-pick the climate in the editor and re-save. It is not a pack to drop.
+**Root cause (offline, decompiled Game.dll and Unity.Collections.dll), superseding rounds 19 and 20c: a vanilla capacity overflow.**
+- `EditorHierarchyUISystem.m_PrefabsCache` is a `NativeParallelHashSet<PrefabData>` created once with capacity **128** (`Allocator.Persistent`, never grown).
+- `UpdateHierarchy` clears it, then `CollectPrefabs` (Workspace list, main thread) and `ObjectHierarchyJob` add to it. The job adds the PrefabData of every top-level object's prefab through a **ParallelWriter, which cannot grow**.
+- With more than about 128 distinct prefabs, `UnsafeParallelHashMapBase.AllocEntry` finds no free slot. `ThrowFull` is `[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]` and is stripped in the release player. So AllocEntry returns −1 and executes `next[-1] = -1`. In the map's single allocation (values `bool`, then keys, then next), `next[-1]` is the **last key slot**, which becomes `PrefabData{m_Index = -1}`.
+- `UpdateFilteredHierarchy` then iterates the cache with the unchecked `GetPrefab<PrefabBase>(PrefabData)` (`m_Prefabs[-1]`) and throws `ArgumentOutOfRangeException`. The filter task never starts, so the error repeats every frame.
+- **This matches everything seen:**
+  - A4b has **136** distinct top-level object prefabs, and the cache reported exactly 128 entries with a −1.
+  - The error starts at map load, or mid-import on a map that crosses about 128 prefabs. An empty map never shows it.
+  - A cache reset is undone by the next rebuild.
+  - No object has a bad prefab.
+- **Duplicate IDs are not involved.** `AddPrefab` gives a duplicate its own index and only skips the `m_PrefabIndices` entry. The Cliffs pack's `CliffSide2 Mesh` / `CliffSide2_LOD1 Mesh` are RenderPrefabs, never top-level objects, so they never enter this cache. **Dropping the pack does not fix the error;** it only removes 10 distinct prefabs from the count. (A swap-removed prefab, `RemovePrefab`, can also leave a stale index past the end in a by-value cache, but nothing removes prefabs here.)
+- **Fix (0.9.20):** `BridgeSystem` checks about once a second. When the editor's cache capacity is below 8192, it completes the tracked jobs, clears the set, sets `Capacity = 8192` (which reallocates through the shared buffer pointer) and resets the panel. The log line is "Workspace hierarchy prefab cache grown from 128 to 8192". The set is persistent, so this happens once per game session, before or after a map load. `POST /diagnostics/hierarchy` and `POST /debug/prefab-refs?fixWorkspace=true` force it.
+- **Unverified in game:** confirm that the error stops on the next A4b load, and that `/diagnostics/hierarchy` reports `capacity: 8192, invalidEntries: 0`.
+- `/debug/prefab-refs` now also scans prefab entities with `PrefabData` disabled (obsolete prefabs).
+
+
+**What `Hydroelectric_Power_Plant_01 Dam` is:** a `RoadPrefab`, not a `PathwayPrefab` (round 13 `/prefabs/info`: 34 m wide, max slope 0, elevation range 0–0). On its own it builds as a level 34 m deck with walls. Why the A4b deck looked like a footbridge:
+- the converter imported it with per-end elevations of 8–25 m above the valley floor, so the game drew elevated segments;
+- a `Pavement Path` (a pathway) runs along the same axis at 167–177 m.
+
+The visible walkway is that path, not the dam net. Its lane set (whether it carries pedestrian lanes) sits in the asset bundle and cannot be read offline; `/prefabs/info?name=Hydroelectric_Power_Plant_01%20Dam` shows it next run. Moot now: the layer is dropped and the dam is placed by hand.
+
+**`/import/objects` `options.grounding` (0.9.20):** for kinds object and plant without `y`, the y comes from the prefab bounds: `boundsMin` = terrain − min.y − sink × height − slope × half footprint, or `pivot` mode, with an optional `maxLift`. See IMPORT_SCHEMA.md. Not exercised in game yet.
+- **Watch:** pack rocks and cliffs have buried skirts (PREFAB_NAMES.md), so plain `boundsMin` can float them.
+- **Safe first run:** `mode: "pivot"` for pack rocks and cliffs, `boundsMin` for vanilla `Rock`/`Boulder`; or `boundsMin` with `maxLift` of about 1.5 m.

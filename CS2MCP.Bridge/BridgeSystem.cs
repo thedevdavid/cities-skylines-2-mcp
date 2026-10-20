@@ -90,6 +90,7 @@ namespace CS2MCP
                 AutoPauseTargetFrame = 0;
                 Mod.Log.Info("timed run finished, simulation auto-paused");
             }
+            m_Handlers.EnsureHierarchyCacheCapacity();
             while (m_Pending.TryDequeue(out BridgeRequest request))
             {
                 BridgeResponse response;
