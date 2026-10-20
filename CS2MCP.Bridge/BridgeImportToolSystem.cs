@@ -74,6 +74,8 @@ namespace CS2MCP
             public float2[] Control;
             /// <summary>Upgrade flags forced on the new segment (quay walls: Side.Raised on the wall side).</summary>
             public CompositionFlags Upgrades;
+            /// <summary>Delete the generic Game.Objects.Pillar sub-objects of the built segments at the end of the import.</summary>
+            public bool NoPillars;
             public string Status = "pending";
             public string Error;
             public List<Entity> Segments = new List<Entity>();
@@ -1555,11 +1557,86 @@ namespace CS2MCP
 
         // ---- completion ----
 
+        /// <summary>
+        /// Deletes the Game.Objects.Pillar sub-objects owned by these segments and by the
+        /// nodes that join only these segments (inner nodes of a split course). The game
+        /// does not recreate them until SubObjectSystem sees the owner Updated again.
+        /// </summary>
+        public int RemovePillars(List<Entity> segments, out int innerNodes)
+        {
+            var set = new HashSet<Entity>(segments);
+            var owners = new List<Entity>();
+            var nodeSeen = new HashSet<Entity>();
+            innerNodes = 0;
+            foreach (Entity segment in segments)
+            {
+                if (!EntityManager.Exists(segment) || !EntityManager.HasComponent<Edge>(segment))
+                {
+                    continue;
+                }
+                owners.Add(segment);
+                Edge edge = EntityManager.GetComponentData<Edge>(segment);
+                foreach (Entity node in new[] { edge.m_Start, edge.m_End })
+                {
+                    if (!nodeSeen.Add(node) || !EntityManager.HasBuffer<ConnectedEdge>(node))
+                    {
+                        continue;
+                    }
+                    bool inner = true;
+                    foreach (ConnectedEdge connected in EntityManager.GetBuffer<ConnectedEdge>(node, true))
+                    {
+                        inner &= set.Contains(connected.m_Edge);
+                    }
+                    if (inner)
+                    {
+                        owners.Add(node);
+                        innerNodes++;
+                    }
+                }
+            }
+            var pillars = new List<Entity>();
+            foreach (Entity owner in owners)
+            {
+                if (!EntityManager.HasBuffer<Game.Objects.SubObject>(owner))
+                {
+                    continue;
+                }
+                foreach (Game.Objects.SubObject sub in EntityManager.GetBuffer<Game.Objects.SubObject>(owner, true))
+                {
+                    if (EntityManager.Exists(sub.m_SubObject) && EntityManager.HasComponent<Game.Objects.Pillar>(sub.m_SubObject)
+                        && !EntityManager.HasComponent<Deleted>(sub.m_SubObject))
+                    {
+                        pillars.Add(sub.m_SubObject);
+                    }
+                }
+            }
+            foreach (Entity pillar in pillars)
+            {
+                EntityManager.AddComponent<Deleted>(pillar);
+            }
+            return pillars.Count;
+        }
+
         private void Finish(string abortReason)
         {
             BridgeResponse response;
             if (m_Job != null)
             {
+                var noPillarSegments = new List<Entity>();
+                int noPillarEdges = 0;
+                foreach (ImportEdge edge in m_Job.Edges)
+                {
+                    if (edge.NoPillars && edge.Segments.Count > 0)
+                    {
+                        noPillarEdges++;
+                        noPillarSegments.AddRange(edge.Segments);
+                    }
+                }
+                if (noPillarSegments.Count > 0)
+                {
+                    int removed = RemovePillars(noPillarSegments, out int nodes);
+                    m_Job.Warnings.Add($"noPillars: deleted {removed} pillar object(s) on {noPillarEdges} edge(s) ({noPillarSegments.Count} segments, {nodes} inner nodes); they come back when the game updates those segments (an edge or node touched later)");
+                }
                 object report = BuildImportReport(abortReason);
                 m_LastReport = report;
                 if (m_Record != null && (m_Record.Edges.Count > 0 || m_Record.Nodes.Count > 0))

@@ -66,6 +66,10 @@ namespace CS2MCP
             public float[] elevation;
             public ImportAttachDto attachTo;
             public string wall;
+            /// <summary>Accepted and ignored: CourseSplitSystem assigns fixed indices itself.</summary>
+            public int? fixedIndex;
+            /// <summary>Delete the generic pillars of this edge's segments after the import.</summary>
+            public bool? noPillars;
         }
 
         public sealed class ImportOptionsDto
@@ -77,6 +81,8 @@ namespace CS2MCP
             public bool? dryRun;
             public string report;
             public bool? bypassValidation;
+            /// <summary>Bridge-prefab checks: "error" (default, blocks), "warn", "off".</summary>
+            public string bridgeRules;
         }
 
         public sealed class ImportRequestDto
@@ -372,8 +378,20 @@ namespace CS2MCP
                     Prefab = prefabEntity,
                     Control = control,
                     Upgrades = upgrades,
+                    NoPillars = dto.noPillars == true,
                 });
+                if (dto.fixedIndex.HasValue && job.Warnings.Count < 1000)
+                {
+                    job.Warnings.Add($"edge '{dto.id}': fixedIndex ignored; send one edge per fixed-span bridge and the game numbers the spans (IMPORT_SCHEMA.md, bridges)");
+                }
             }
+
+            string bridgeMode = (options.bridgeRules ?? "error").Trim().ToLowerInvariant();
+            if (bridgeMode != "error" && bridgeMode != "warn" && bridgeMode != "off")
+            {
+                problems.Add("options.bridgeRules must be error, warn or off");
+            }
+            List<object> bridgeReport = problems.Count == 0 ? CheckBridgeEdges(job, bridgeMode, problems, ref heightData) : new List<object>();
 
             if (problems.Count > 0)
             {
@@ -381,6 +399,7 @@ namespace CS2MCP
                 {
                     error = $"{problems.Count} problem(s) in the import body; nothing was built",
                     problems = problems.Count > 200 ? problems.GetRange(0, 200) : problems,
+                    bridges = bridgeReport.Count > 0 ? bridgeReport : null,
                 }, 400);
             }
 
@@ -409,6 +428,7 @@ namespace CS2MCP
                     batchSize = job.BatchSize,
                     nodesFirst = job.NodesFirst,
                     warnings = job.Warnings,
+                    bridges = bridgeReport,
                 });
             }
 

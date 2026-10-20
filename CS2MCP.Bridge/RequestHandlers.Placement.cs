@@ -99,6 +99,7 @@ namespace CS2MCP
                     segmentLength,
                 };
             }
+            object bridge = BridgeInfo(prefabEntity, prefab);
             return BridgeResponse.Json(new
             {
                 name = prefab.name,
@@ -108,9 +109,75 @@ namespace CS2MCP
                 geometry,
                 placement,
                 network,
+                bridge,
                 note = "lot = the building's footprint in 8 m cells (x = width along its front, depth = z); " +
                        "placement flags tell where it can go (Shoreline = on the water's edge, use cs2_place_shoreline).",
             });
+        }
+
+        /// <summary>
+        /// The Game.Prefabs.Bridge authoring values plus what NetInitializeSystem derived
+        /// from them (edge length range, geometry flags, FixedNetElement spans).
+        /// </summary>
+        private object BridgeInfo(Entity prefabEntity, PrefabBase prefab)
+        {
+            if (!(prefab is NetPrefab) || !prefab.TryGet(out Bridge authoring))
+            {
+                return null;
+            }
+            var segments = new List<object>();
+            if (authoring.m_FixedSegments != null)
+            {
+                foreach (FixedNetSegmentInfo info in authoring.m_FixedSegments)
+                {
+                    segments.Add(new { length = info.m_Length, countRange = new[] { info.m_CountRange.x, info.m_CountRange.y }, canCurve = info.m_CanCurve });
+                }
+            }
+            var elements = new List<object>();
+            if (EntityManager.HasBuffer<FixedNetElement>(prefabEntity))
+            {
+                foreach (FixedNetElement e in EntityManager.GetBuffer<FixedNetElement>(prefabEntity, true))
+                {
+                    elements.Add(new
+                    {
+                        lengthRange = new[] { e.m_LengthRange.min, e.m_LengthRange.max },
+                        countRange = new[] { e.m_CountRange.x, e.m_CountRange.y },
+                        straight = (e.m_Flags & FixedNetFlags.Straight) != 0,
+                    });
+                }
+            }
+            object derived = null;
+            if (EntityManager.HasComponent<NetGeometryData>(prefabEntity))
+            {
+                NetGeometryData g = EntityManager.GetComponentData<NetGeometryData>(prefabEntity);
+                derived = new
+                {
+                    edgeLengthRange = new[] { g.m_EdgeLengthRange.min, g.m_EdgeLengthRange.max },
+                    elevatedLength = g.m_ElevatedLength,
+                    elevationLimit = g.m_ElevationLimit,
+                    minElevatedHeight = g.m_ElevationLimit * 2f,
+                    flags = g.m_Flags.ToString(),
+                    minWaterElevation = EntityManager.HasComponent<PlaceableNetData>(prefabEntity)
+                        ? EntityManager.GetComponentData<PlaceableNetData>(prefabEntity).m_MinWaterElevation
+                        : (float?)null,
+                };
+            }
+            return new
+            {
+                segmentLength = authoring.m_SegmentLength,
+                hanging = authoring.m_Hanging,
+                elevationOnWater = authoring.m_ElevationOnWater,
+                canCurve = authoring.m_CanCurve,
+                allowMinimalLength = authoring.m_AllowMinimalLength,
+                waterFlow = authoring.m_WaterFlow.ToString(),
+                buildStyle = authoring.m_BuildStyle.ToString(),
+                fixedSegments = segments,
+                fixedElements = elements,
+                derived,
+                contract = elements.Count > 0
+                    ? "fixed spans: import ONE edge abutment to abutment; the game cuts it into these spans (see IMPORT_SCHEMA.md, bridges)"
+                    : "edges of 0.6-1.4 x segmentLength; a longer edge is cut into equal pieces by the game",
+            };
         }
 
         /// <summary>

@@ -474,3 +474,38 @@ The visible walkway is that path, not the dam net. Its lane set (whether it carr
 **`/import/objects` `options.grounding` (0.9.20):** for kinds object and plant without `y`, the y comes from the prefab bounds: `boundsMin` = terrain − min.y − sink × height − slope × half footprint, or `pivot` mode, with an optional `maxLift`. See IMPORT_SCHEMA.md. Not exercised in game yet.
 - **Watch:** pack rocks and cliffs have buried skirts (PREFAB_NAMES.md), so plain `boundsMin` can float them.
 - **Safe first run:** `mode: "pivot"` for pack rocks and cliffs, `boundsMin` for vanilla `Rock`/`Boulder`; or `boundsMin` with `maxLift` of about 1.5 m.
+
+## Round 22 (0.9.22, offline): bridge prefabs, fixed spans, pillars
+
+**Fixed spans need no `fixedIndex`.**
+- **Who numbers the spans:** the vanilla net tool never sets `NetCourse.m_FixedIndex` for a new course; it copies it only from existing edges, as our replace and upgrade paths already do. `CourseSplitSystem.TryAddCoursePhase2` sees the prefab's `FixedNetElement` buffer and does the work: it cuts the single course into the span sequence, numbers the spans and scales them to the course length.
+- **What this means for the importer:** a fixed-span bridge must be ONE import edge, abutment to abutment. Splitting it into 4 edges would have built 4 complete scaled-down bridges.
+- **Contract:** see IMPORT_SCHEMA.md "Bridge prefabs". BXP SuspensionBridge03 takes 585.6–1366.4 m; 976 m gives exact spans. Its towers sit at 168/976 and 808/976 of L.
+- **Edge field:** `fixedIndex` is accepted and ignored, with a warning.
+
+**Non-fixed bridge prefabs:** the game cuts an edge longer than 1.4 × segmentLength into equal pieces. So one edge per straight run is enough, for example BR005 at 305 m becomes 2 × 152.5 m.
+
+**Pre-validation (`options.bridgeRules`, default `error`):**
+- **Rules:** `bridge.length.short`, `bridge.straight`, `bridge.lowElevation`, `bridge.fixed.repeat` and `bridge.fixed.chained` are errors. `bridge.fixed.short` and `bridge.waterClearance` are warnings.
+- **Output:** the dry run returns a per-edge `bridges` block with the predicted split, span starts and tower positions.
+- **`m_ElevationOnWater`** is only a placement aid in the net tool, so a deck below it is a warning.
+
+**`/prefabs/info` `bridge` block:**
+- the `Bridge` authoring values (segmentLength, hanging, elevationOnWater, canCurve, allowMinimalLength, waterFlow, buildStyle, fixedSegments);
+- the derived `FixedNetElement` spans;
+- the edge length range, elevationLimit and geometry flags.
+
+The prefab class was already reported as `type`.
+
+**Offline rules:** `bridges/cs2-bridge-rules.json` holds the 74 bridge prefabs of BXP (92245) and BXP B&P (124160), parsed from the binary `.Prefab` files in the mods' `.cok` zips. The fields are serialised with their UTF-16 names; in a fixed span, `m_CountRange` comes before `m_Length`.
+- **Vanilla and DLC prefabs:** not on disk (resources.assets); read them with `/prefabs/info` next run.
+- **Count ranges:** a component of 0 means unbounded (componentwise `math.select`). For example, `BXP Double Deck Suspension Bridge - Highway` has 320 m × 1…∞.
+
+**`noPillars`:** pillars are `Game.Objects.Pillar` sub-objects in the edge's or node's `SubObject` buffer. SubObjectSystem rebuilds them only for owners that carry `Updated` or `Deleted`, so deleting them sticks until the owner is touched again.
+- **The edge flag:** an edge with `noPillars: true` gets its pillars deleted with a raw `Deleted` when the import finishes. This covers the edge's segments and the inner nodes joined only by them; end nodes are left alone.
+- **Re-running it:** `POST /net/pillars/remove {segments:["i:v",...]}` does the same for existing segments.
+- **Unverified:**
+  - that a raw `Deleted` on a pillar does not mark its owner `Updated`, which would respawn the pillar at once;
+  - that the deletion survives a save and load.
+
+  If it fails, Pillar Spacing (162558) is the global alternative.

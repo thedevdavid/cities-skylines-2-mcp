@@ -1717,6 +1717,8 @@ server.registerTool(
               .enum(["left", "right", "both", "none"])
               .optional()
               .describe("Force quay/retaining walls: Side.Raised upgrade on that side (left/right seen from a to b)"),
+            noPillars: z.boolean().optional().describe("Delete the generic pillars of this edge's segments after the import (they return if the segment is updated later)"),
+            fixedIndex: z.number().int().optional().describe("Ignored: send ONE edge per fixed-span bridge; the game numbers the spans"),
           }),
         )
         .optional(),
@@ -1735,6 +1737,10 @@ server.registerTool(
             .enum(["summary", "full"])
             .optional()
             .describe("summary (default): counts per status and prefab plus failed ids; full adds every per-edge result (large)"),
+          bridgeRules: z
+            .enum(["error", "warn", "off"])
+            .optional()
+            .describe("Checks for bridge prefabs (length, straightness, elevation, fixed spans): error (default) blocks the import, warn reports only"),
         })
         .optional(),
     },

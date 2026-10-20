@@ -60,6 +60,8 @@ A node has exactly one height. All edges meeting at a node use it, so conflictin
 | `elevation` | Optional `[e1, e2]`, used only for nodes that have no `elevation` of their own. |
 | `attachTo` | Optional `{a?: {radius, prefabContains?}, b?: {...}}`: `snapToSegment` for that end's node, unless the node has its own. |
 | `wall` | Optional `left`, `right`, `both` or `none`. Forces a wall on that side whatever the elevation (quays). Left and right are seen travelling from `a` to `b`. The edge definition carries `Game.Net.Upgraded` with `CompositionFlags.Side.Raised` on that side. `GenerateEdgesSystem` copies it onto the new edge, and `CompositionSelectSystem` ORs upgrade flags into the composition, the same mechanism as road upgrades and the mods that add retaining walls. It only shows a wall where the net has a composition for raised sides (quays do; other roads only with such an asset). |
+| `noPillars` | Optional `true` (0.9.22). When the import ends, deletes the generic `Game.Objects.Pillar` sub-objects of the edge's segments, and of the nodes that join only those segments. They come back whenever the game updates such a segment, for example when a later edge connects at its node, so set it on the last import that touches the bridge, or re-run `POST /net/pillars/remove`. Bridge-prefab towers and anchors are not `Pillar` objects and stay. **Unverified in game.** |
+| `fixedIndex` | Accepted and ignored, with a warning. The game assigns fixed span indices itself (see "Bridge prefabs"). |
 
 End-to-end length must be 4–1500 m. The game may split an edge into several segments where it crosses other networks; all of them are reported.
 
@@ -74,6 +76,46 @@ End-to-end length must be 4–1500 m. The game may split an edge into several se
 | `dryRun` | false | Validate ids, references, prefab names and lengths; build nothing. |
 | `bypassValidation` | false | Sets `ToolSystem.ignoreErrors` (the game's own ignore-errors switch, which `GetAllowApply` honours) for the duration of the import and restores the previous value afterwards, also when the import is interrupted. Imports then no longer depend on Anarchy's toggle or the open tool. The report's `validation` block records it. |
 | `report` | `"summary"` | `"full"` adds every per-edge result to the response. Large imports should keep the summary and page with `GET /import/report`. |
+| `bridgeRules` | `"error"` | Checks on edges whose prefab is a bridge (see "Bridge prefabs"). `"error"` rejects the import (400) and lists the broken rules in `problems`. `"warn"` reports them in `warnings` and builds anyway. `"off"` skips the checks. The dry run and the 400 answer carry a per-edge `bridges` block either way. |
+
+### Bridge prefabs (0.9.22)
+
+From the decompiled game: `NetInitializeSystem` turns `Game.Prefabs.Bridge` into net data, `CourseSplitSystem.TryAddCoursePhase2` splits each course (**one import edge = one course**), and `ValidationHelpers` raises the errors. `GET /prefabs/info?name=…` returns a `bridge` block with the authoring values and the derived ranges. The offline values for the two BXP packs are in `bridges/cs2-bridge-rules.json`.
+
+**Fixed-span prefabs** (`bridge.fixedElements` not empty, e.g. `BXP SuspensionBridge03 - Six Lane Highway`: 168 + 320 + 320 + 168 m):
+- **One edge per bridge.** Send ONE edge from abutment to abutment, with no nodes in between and no `fixedIndex`. There is nothing for the converter to number: the vanilla net tool never sets `NetCourse.m_FixedIndex` either. `CourseSplitSystem` cuts the course into the span sequence, sets `m_FixedIndex` 0…n−1 and marks the inner cut points `IsFixed`. `GenerateEdgesSystem` then writes `Game.Net.Fixed{m_Index}`, and the towers come from the prefab's sub-objects (`NodeBetweenFixedSegment` etc.).
+- **Span lengths.** When every span length is > 0.1, each span may be 0.6–1.4 × its length. The edge length L (x/z, through `control`) must lie within Σ0.6·len … Σ1.4·len; for SuspensionBridge03 that is 585.6–1366.4 m, nominal 976 m.
+  - **L > Σmin:** the game gives each span its minimum plus a share of the excess in proportion to its range, so all spans scale by the same factor. At L = 976 every span is exact.
+  - **L < Σmin:** every span shrinks in proportion.
+  - **L > Σmax:** the whole sequence is built ceil((L − 0.16) / Σmax) times. That is rule `bridge.fixed.repeat`.
+  - **Exact lengths:** if any span length is ≤ 0.1, the spans with a length are exact (min = max) and the zero ones take the edge range.
+- **Towers.** They sit at the cumulative span ends: for SuspensionBridge03 at L × 168/976 and L × 808/976 from `a`. The dry run lists them in `bridges[].split.spans[].start`.
+- **No tolerance at inner nodes.** No node may be placed between spans. Rule `bridge.fixed.chained` rejects any edge of a fixed-span prefab that shares a node with another edge of a fixed-span prefab.
+- **Straight spans.** A span whose `canCurve` is false is laid straight along the end tangent. When all spans are straight, the whole bridge is a straight line from `a` to `b`, so do not give it a `control`.
+- **Count ranges.** A span's `countRange` [x, y] lets the game repeat that span x…y times; a component of 0 means unbounded. Each span is cut into ceil((len − 0.16) / max) pieces within that range.
+- **End nodes.** The deck nodes at `a` and `b` are ordinary nodes; approaches join there.
+
+**Non-fixed bridge prefabs** (e.g. `BXP Truss Arch Bridge - Highway Oneway - 2 Lanes`, segmentLength 128):
+- **Splitting.** Send one edge per straight run. The game cuts an edge longer than the maximum (1.4 × segmentLength = `elevatedLength`) into ceil((L − 0.16) / max) equal pieces.
+  - BR005 at 305 m becomes 2 × 152.5 m, which gives the two-arch look from a single edge.
+  - Two edges are needed only where the deck changes direction.
+- **Minimum.** Edges must be ≥ 0.6 × segmentLength (rule `bridge.length.short`, the game's `ShortDistance`), unless `allowMinimalLength` is set. Validation allows up to 1.1 × max before the split, so the split always lands in range.
+
+**Rules checked (names as reported):**
+
+| Rule | Severity | Check |
+|---|---|---|
+| `bridge.length.short` | error | non-fixed: L < 0.6 × segmentLength |
+| `bridge.straight` | error | the prefab has no `canCurve` and a `control` point lies > 1 m off the a–b chord. |
+| `bridge.lowElevation` | error | the highest of the end and middle elevations above the terrain is < 2 × the net's `elevationLimit`, the game's `LowElevation` check (bridges always `RequireElevated`). A deck y from `absolute` / elevation counts. |
+| `bridge.fixed.repeat` | error | L > Σmax |
+| `bridge.fixed.chained` | error | a fixed-span edge shares a node with another fixed-span edge |
+| `bridge.fixed.short` | warning | L < Σmin (the spans shrink) |
+| `bridge.waterClearance` | warning | the deck is less than `elevationOnWater` above the water surface at one of 9 points over water ≥ 0.2 m deep. The net tool raises the deck to this height when drawing by hand, but validation does not check it. |
+
+**Other rules:**
+- **Symmetry and slopes.** The game also forces symmetrical edges and smooth slopes on bridge prefabs (`SymmetricalEdges`, `SmoothSlopes`), so keep a constant grade over the bridge. These are not pre-checked.
+- **`bypassValidation`** lets ShortDistance and LowElevation pass in game. The pre-checks still apply unless `bridgeRules` is `warn` or `off`.
 
 ## How it builds
 
