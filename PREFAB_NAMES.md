@@ -124,3 +124,94 @@ for p in EU_Wall01 EU_Wall01Long EU_Wall01Short EU_Wall01ExtraShort EU_Wall03 EU
 | `EU_Wall01ExtraShort`, `EU_Wall03ExtraShort` | 0.50 m | 0.90 m | 0.19 / 0.18 m |
 
 At 0.9 m high, these are garden walls, not fort walls.
+
+## Rocks, cliffs and ground cover: geometry bounds (measured live)
+
+Read with `GET /prefabs/info?name=<prefab>` (bridge 0.9.19, `geometry.boundsMin` / `boundsMax`, the prefab's `ObjectGeometryData.m_Bounds` in local metres around the pivot) on 2026-10-20, with the cs2-playset packs from `cs2-playset/ASSET_PACKS.md` loaded. `Size` is the game's `m_Size` field, which is not always max − min (the game sets y to max.y); use the bounds for placement.
+
+- **min.y is negative for every prefab:** the pivot sits above the mesh bottom. An object placed with its pivot on the terrain (y empty) is already sunk by |min.y|.
+- **For a pack rock or cliff,** the sinking is the author's intent: the mesh skirt goes under the ground, and `CliffFreeStanding`, `CliffSideTall` and `CliffSlim` reach 105–131 m down. `y = terrain − min.y` lifts the bottom of the mesh onto the terrain, so the whole skirt shows and the piece floats. Use it only where the CS1 prop sat with its base on the ground and the CS2 mesh has no skirt; the safe default is pivot on terrain (no y). For cliffs, lift by a fraction at most.
+- **Vanilla `Rock01`–`Rock30`** have min.y = −max.y: the pivot is at the mesh centre, so half the rock is buried. Lift by |min.y| (0.22–0.40 m) if the full stone should show.
+- **The trailing space in `pd Long Grass Prop ` is part of the prefab name.**
+
+| Prefab | Pack | Size x × y × z (m) | min.y | max.y | x range | z range |
+|---|---|---|---|---|---|---|
+| `rzrock1` | RZ Rocks | 19.24 × 8.85 × 14.64 | -1.19 | 8.85 | -8.84..9.62 | -7.32..3.76 |
+| `rzrock2` | RZ Rocks | 24.59 × 9.80 × 22.46 | -1.13 | 9.80 | -12.30..11.15 | -10.20..11.23 |
+| `rzrock3` | RZ Rocks | 28.06 × 8.74 × 18.78 | -0.65 | 8.74 | -14.03..13.11 | -9.39..5.77 |
+| `rzrock4` | RZ Rocks | 26.51 × 10.37 × 25.13 | -0.92 | 10.37 | -12.37..13.25 | -9.91..12.56 |
+| `rzrock5` | RZ Rocks | 12.75 × 2.87 × 23.07 | -0.75 | 2.87 | -6.18..6.38 | -9.69..11.53 |
+| `rzrock6` | RZ Rocks | 14.88 × 14.56 × 24.88 | -0.62 | 14.56 | -7.44..7.22 | -12.44..10.04 |
+| `rzrock7` | RZ Rocks | 13.21 × 4.72 × 20.34 | -0.41 | 4.72 | -6.45..6.61 | -9.65..10.17 |
+| `rzrock8` | RZ Rocks | 30.02 × 10.74 × 36.86 | -0.76 | 10.74 | -14.12..15.01 | -18.43..8.52 |
+| `RZaridrock1` | Arid Rocks | 10.40 × 3.77 × 6.56 | -0.37 | 3.77 | -5.20..4.78 | -3.28..3.26 |
+| `RZaridrock2` | Arid Rocks | 7.09 × 2.97 × 13.00 | -0.25 | 2.97 | -3.54..2.89 | -4.27..6.50 |
+| `RZaridrock3` | Arid Rocks | 3.64 × 1.42 × 3.01 | -0.30 | 1.42 | -1.82..1.04 | -1.51..1.42 |
+| `RZaridrock4` | Arid Rocks | 5.00 × 1.27 × 3.16 | -0.30 | 1.27 | -2.50..2.15 | -1.09..1.58 |
+| `RZaridrock5` | Arid Rocks | 8.37 × 5.52 × 2.51 | -0.17 | 5.52 | -3.96..4.19 | -1.23..1.26 |
+| `CliffFreeStanding` | Cliffs and Rocks Pack | 157.50 × 64.75 × 164.80 | -130.66 | 64.75 | -62.83..78.75 | -82.40..77.20 |
+| `CliffRock3` | Cliffs and Rocks Pack | 77.50 × 17.30 × 98.97 | -13.71 | 17.30 | -38.07..38.75 | -42.09..49.48 |
+| `CliffRock5` | Cliffs and Rocks Pack | 38.15 × 14.35 × 36.41 | -2.57 | 14.35 | -19.07..17.10 | -18.06..18.20 |
+| `CliffRock6` | Cliffs and Rocks Pack | 60.71 × 8.50 × 55.32 | -1.10 | 8.50 | -23.15..30.36 | -25.99..27.66 |
+| `CliffSide2` | Cliffs and Rocks Pack | 161.08 × 62.28 × 146.44 | -23.39 | 62.28 | -57.66..80.54 | -72.45..73.22 |
+| `CliffSide2Left` | Cliffs and Rocks Pack | 161.08 × 68.36 × 156.74 | -29.68 | 68.36 | -57.66..80.54 | -74.21..78.37 |
+| `CliffSide2Right` | Cliffs and Rocks Pack | 161.08 × 68.43 × 155.21 | -29.61 | 68.43 | -57.66..80.54 | -77.60..74.98 |
+| `CliffSideTall` | Cliffs and Rocks Pack | 161.08 × 62.28 × 146.44 | -109.22 | 62.28 | -57.66..80.54 | -72.57..73.22 |
+| `CliffSlim` | Cliffs and Rocks Pack | 161.08 × 62.28 × 85.10 | -104.88 | 62.28 | -57.66..80.54 | -42.10..42.55 |
+| `CliffStack` | Cliffs and Rocks Pack | 60.97 × 48.59 × 67.90 | -21.62 | 48.59 | -27.55..30.49 | -33.95..31.34 |
+| `pd Long Grass` | pd Long Grass | 3.36 × 1.76 × 3.36 | -0.79 | 1.76 | -1.52..1.52 | -1.68..1.68 |
+| `pd Long Grass Prop ` | pd Long Grass | 6.72 × 2.52 × 6.72 | -0.73 | 2.52 | -3.03..2.92 | -3.36..2.98 |
+| `Grass01 (Styx's)` | Styx's grass | 0.29 × 0.60 × 0.29 | -0.02 | 0.60 | -0.14..0.14 | -0.14..0.14 |
+| `Grass02 (Styx's)` | Styx's grass | 0.48 × 0.99 × 0.48 | -0.05 | 0.99 | -0.24..0.24 | -0.24..0.24 |
+| `Grass03 (Styx's)` | Styx's grass | 0.48 × 1.71 × 0.48 | -0.09 | 1.71 | -0.24..0.24 | -0.24..0.24 |
+| `Grass04 (Styx's)` | Styx's grass | 0.29 × 0.54 × 0.29 | -0.08 | 0.54 | -0.14..0.14 | -0.14..0.14 |
+| `Grass05 (Styx's)` | Styx's grass | 0.48 × 0.96 × 0.48 | -0.08 | 0.96 | -0.24..0.24 | -0.24..0.24 |
+| `Grass06 (Styx's)` | Styx's grass | 0.48 × 1.71 × 0.48 | -0.09 | 1.71 | -0.24..0.24 | -0.24..0.24 |
+| `gaga - Fern 1` | Ferns | 1.00 × 0.86 × 1.00 | -0.01 | 0.86 | -0.50..0.50 | -0.44..0.44 |
+| `gaga - Fern 2` | Ferns | 1.03 × 0.86 × 1.03 | -0.01 | 0.86 | -0.45..0.45 | -0.51..0.51 |
+| `ReikUndergrowth01` | Leafy Undergrowth | 2.54 × 2.06 × 2.54 | -0.96 | 2.06 | -1.27..1.27 | -1.09..1.09 |
+| `ReikUndergrowth01Trimmed` | Leafy Undergrowth | 3.71 × 1.12 × 3.71 | -1.04 | 1.12 | -1.85..1.85 | -0.92..0.92 |
+| `ReikUndergrowth01XL` | Leafy Undergrowth | 13.70 × 1.71 × 13.70 | -1.57 | 1.71 | -6.58..6.58 | -6.85..6.85 |
+| `ReikUndergrowth02` | Leafy Undergrowth | 2.54 × 2.06 × 2.54 | -0.96 | 2.06 | -1.27..1.27 | -1.09..1.09 |
+| `ReikUndergrowth02Trimmed` | Leafy Undergrowth | 3.71 × 1.12 × 3.71 | -1.04 | 1.12 | -1.85..1.85 | -0.92..0.92 |
+| `ReikUndergrowth02XL` | Leafy Undergrowth | 13.70 × 1.71 × 13.70 | -1.57 | 1.71 | -6.58..6.58 | -6.85..6.85 |
+| `PD-YellowFlower` | Flowers | 0.54 × 0.37 × 0.54 | -0.19 | 0.37 | -0.24..0.24 | -0.27..0.27 |
+| `pd Bloom` | Flowers | 1.34 × 0.91 × 1.34 | -0.29 | 0.91 | -0.67..0.67 | -0.61..0.61 |
+| `Rock01` | vanilla | 1.00 × 0.31 × 0.94 | -0.31 | 0.31 | -0.50..0.50 | -0.47..0.47 |
+| `Rock02` | vanilla | 1.00 × 0.29 × 0.76 | -0.29 | 0.29 | -0.50..0.50 | -0.38..0.38 |
+| `Rock03` | vanilla | 0.87 × 0.30 × 0.89 | -0.30 | 0.30 | -0.44..0.44 | -0.44..0.44 |
+| `Rock04` | vanilla | 0.81 × 0.31 × 0.83 | -0.31 | 0.31 | -0.40..0.40 | -0.42..0.42 |
+| `Rock05` | vanilla | 0.86 × 0.32 × 0.83 | -0.32 | 0.32 | -0.43..0.43 | -0.42..0.42 |
+| `Rock06` | vanilla | 0.96 × 0.40 × 1.05 | -0.40 | 0.40 | -0.48..0.48 | -0.52..0.52 |
+| `Rock07` | vanilla | 0.92 × 0.31 × 0.92 | -0.31 | 0.31 | -0.46..0.46 | -0.46..0.46 |
+| `Rock08` | vanilla | 1.05 × 0.33 × 0.85 | -0.33 | 0.33 | -0.52..0.52 | -0.43..0.43 |
+| `Rock09` | vanilla | 0.98 × 0.33 × 0.90 | -0.33 | 0.33 | -0.49..0.49 | -0.45..0.45 |
+| `Rock10` | vanilla | 0.97 × 0.33 × 0.93 | -0.33 | 0.33 | -0.49..0.49 | -0.46..0.46 |
+| `Rock11` | vanilla | 1.00 × 0.32 × 0.98 | -0.32 | 0.32 | -0.50..0.50 | -0.49..0.49 |
+| `Rock12` | vanilla | 0.86 × 0.27 × 0.82 | -0.27 | 0.27 | -0.43..0.43 | -0.41..0.41 |
+| `Rock13` | vanilla | 0.90 × 0.26 × 0.84 | -0.26 | 0.26 | -0.45..0.45 | -0.42..0.42 |
+| `Rock14` | vanilla | 0.94 × 0.36 × 0.87 | -0.36 | 0.36 | -0.47..0.47 | -0.43..0.43 |
+| `Rock15` | vanilla | 0.94 × 0.28 × 0.87 | -0.28 | 0.28 | -0.47..0.47 | -0.43..0.43 |
+| `Rock16` | vanilla | 0.89 × 0.22 × 0.76 | -0.22 | 0.22 | -0.44..0.44 | -0.38..0.38 |
+| `Rock17` | vanilla | 0.96 × 0.28 × 0.82 | -0.28 | 0.28 | -0.48..0.48 | -0.41..0.41 |
+| `Rock18` | vanilla | 0.80 × 0.27 × 0.89 | -0.27 | 0.27 | -0.40..0.40 | -0.45..0.45 |
+| `Rock19` | vanilla | 0.89 × 0.26 × 0.76 | -0.26 | 0.26 | -0.44..0.44 | -0.38..0.38 |
+| `Rock20` | vanilla | 0.65 × 0.33 × 0.80 | -0.33 | 0.33 | -0.32..0.32 | -0.40..0.40 |
+| `Rock21` | vanilla | 0.82 × 0.33 × 0.68 | -0.33 | 0.33 | -0.41..0.41 | -0.34..0.34 |
+| `Rock22` | vanilla | 0.93 × 0.25 × 0.80 | -0.25 | 0.25 | -0.47..0.47 | -0.40..0.40 |
+| `Rock23` | vanilla | 0.83 × 0.23 × 0.94 | -0.23 | 0.23 | -0.41..0.41 | -0.47..0.47 |
+| `Rock24` | vanilla | 1.07 × 0.27 × 0.94 | -0.27 | 0.27 | -0.53..0.53 | -0.47..0.47 |
+| `Rock25` | vanilla | 1.03 × 0.32 × 0.88 | -0.32 | 0.32 | -0.52..0.52 | -0.44..0.44 |
+| `Rock26` | vanilla | 0.99 × 0.36 × 0.84 | -0.36 | 0.36 | -0.49..0.49 | -0.42..0.42 |
+| `Rock27` | vanilla | 0.95 × 0.31 × 0.96 | -0.31 | 0.31 | -0.47..0.47 | -0.48..0.48 |
+| `Rock28` | vanilla | 0.88 × 0.38 × 0.88 | -0.38 | 0.38 | -0.44..0.44 | -0.44..0.44 |
+| `Rock29` | vanilla | 1.05 × 0.34 × 0.92 | -0.34 | 0.34 | -0.52..0.52 | -0.46..0.46 |
+| `Rock30` | vanilla | 0.97 × 0.33 × 0.83 | -0.33 | 0.33 | -0.48..0.48 | -0.42..0.42 |
+| `Boulder01` | vanilla | 5.57 × 2.43 × 4.37 | -1.35 | 2.43 | -2.50..2.78 | -2.18..2.19 |
+| `Boulder02` | vanilla | 4.82 × 2.43 × 4.04 | -1.64 | 2.43 | -2.01..2.41 | -1.93..2.02 |
+| `Boulder03` | vanilla | 4.80 × 1.84 × 5.44 | -1.24 | 1.84 | -2.36..2.40 | -2.26..2.72 |
+| `Boulder04` | vanilla | 5.77 × 2.58 × 4.60 | -1.30 | 2.58 | -2.67..2.88 | -2.30..2.02 |
+| `Boulder05` | vanilla | 4.71 × 2.09 × 5.01 | -1.33 | 2.09 | -2.35..2.29 | -2.50..2.47 |
+| `Boulder06` | vanilla | 4.85 × 2.53 × 4.66 | -1.65 | 2.53 | -2.18..2.43 | -2.33..2.21 |
+| `Boulder07` | vanilla | 5.32 × 1.82 × 4.27 | -1.36 | 1.82 | -2.49..2.66 | -2.14..2.06 |
+| `Boulder08` | vanilla | 5.53 × 1.76 × 5.26 | -1.83 | 1.76 | -2.65..2.77 | -2.37..2.63 |

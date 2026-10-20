@@ -416,3 +416,37 @@ I had ruled the name out because the loader resolved `%20dakota-A4-2048.cok`, fo
 - **Empty map:** with the pack loaded and an empty map, no errors occur.
 - **Cause:** the error starts during large imports (a race in the Workspace panel's cache, stuck afterwards).
 - **Fix:** a restart or `POST /diagnostics/hierarchy`.
+
+## Round 21 (0.9.20): dam deck, Arc bridges, prefab bounds, `/debug/prefab-refs`
+
+**What the dam deck became (live on dakota-A4b):** the deck course is `Hydroelectric_Power_Plant_01 Dam`, the dam *net*. It has 5 segments (1631625–1631629, nodes 1631044–1631620) from (1440, 4673) to (1577, 4694), with per-end elevations of 8–11 m and 25 m at the east end. The splits at x ≈ 1489/1496 and 1520/1527 are where the two 8.6 m pieces join. A `Pavement Path` runs along the same line (631449–631451 and 1629322/1629325, x 1443 → 1585). `/graph/export?prefab=Arc` counts **87** `Arc Pedestrian Bridge` segments in the save.
+
+**Decision (orchestrator):** both layers, the dam deck (`Hydroelectric_Power_Plant_01 Dam`) and the decor `Arc Pedestrian Bridge` edges, are **dropped from the runner**. The dam becomes a hand-placed item in the editor; the runner no longer imports either layer.
+
+**Prefab bounds:** `/prefabs/info` returns `geometry.boundsMin/boundsMax` since 0.9.19. The live table for every rock, cliff and ground-cover prefab in `cs2-playset/ASSET_PACKS.md`, plus vanilla `Rock01–30` and `Boulder01–08`, is in PREFAB_NAMES.md. **min.y is negative everywhere.**
+- **Pack meshes:** the pivot is above the mesh bottom, so `y = terrain − min.y` lifts the buried skirt into view. The tall cliffs reach 105–131 m below the pivot.
+- **Vanilla rocks:** the pivot is at the mesh centre.
+- **Converter:** apply the lift per family, not globally.
+
+**Hierarchy error, A4b (loaded without imports):** the errors began during the map load, not during an import.
+- **Objects:** `GET /diagnostics/hierarchy` found every top-level object valid.
+- **Panel cache:** it held two entries with index −1. `POST` cleared it, but one −1 came back on the rebuild, so something current feeds it.
+- **Where a −1 comes from:** in `EditorHierarchyUISystem` the cache is filled only by `ObjectHierarchyJob` (the PrefabData of top-level objects) and `CollectPrefabs` (the Workspace "Prefabs" list `m_Prefabs`, unchecked).
+- **Why −1 is odd:** in `PrefabSystem`, −1 is the first obsolete prefab (`AddObsoleteID`, index −1−j: a save referencing a prefab that is not loaded). But this Player.log has **no "Unknown prefab ID" line**.
+- **Duplicate IDs logged at startup:**
+  - user-save-embedded `TemperateArchipelagoHavenClimate (copy)`, `BarrierIslandWaterRenderSettings`, `DefaultTerrainRenderSettings`, `Canadian Rockies` and `Banff National Park`, from 8 saves in `Saves/76561198039632782`;
+  - `CliffSide2 Mesh` / `CliffSide2_LOD1 Mesh` (one hash, Cliffs and Rocks pack).
+
+  Duplicates only warn, so none of them makes a −1 by itself.
+
+`GET /debug/prefab-refs` (0.9.20, needs the restart) names the source. It reports:
+- every prefab entity whose index is outside the list, with its name (or the obsolete ID's name), the holders by PrefabRef (top-level ones counted apart) and samples;
+- PrefabRefs to missing entities;
+- every duplicate PrefabID group, with type, asset path and which member the ID resolves to;
+- the save's unresolved IDs (`m_LoadedObsoleteIDs`) and the obsolete entities;
+- the Workspace "Prefabs" list with each entry's index;
+- the panel cache.
+
+`POST /debug/prefab-refs?fixWorkspace=true` drops Workspace entries with an invalid index and resets the panel.
+
+**Expectation:** the −1 is either an obsolete prefab held by a top-level object created after the scan, or a Workspace entry. The endpoint shows which. If it is a save-embedded climate or render settings prefab, the fix is on the map side: re-pick the climate in the editor and re-save. It is not a pack to drop.

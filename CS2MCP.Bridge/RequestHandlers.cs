@@ -207,6 +207,8 @@ namespace CS2MCP
                     return ImportResources(request);
                 case "/map/resources":
                     return ReadResources(request);
+                case "/debug/prefab-refs":
+                    return PrefabRefsDebug(request);
                 case "/diagnostics/hierarchy":
                     return HierarchyDiagnostics(request);
                 case "/map/checklist":
