@@ -586,3 +586,28 @@ So "segments built without Anarchy's protection get removed later" has no mechan
 4. Check `/entity/subnets?index=<plant>` for degree-2 inner dam nodes.
 
 **Side finding:** two `TransformerStation01` (163022:1 and 135364:17) stand at the same spot (1594.28, 4549.11), probably the substation imported twice. Delete one.
+
+## Round 26 (0.9.26, offline): TM:PE import against Traffic's validation
+
+**What happened on A5** (`tmpe-20261020-082957`, Traffic 0.2.13): "couldn't load data from 7 of 9 intersections".
+- **The validation ran during our import.** `TrafficDataMigrationSystem` has a `_loaded` flag that every map load sets. Its `OnUpdate` runs once, and clears the flag, only when a node with `ModifiedLaneConnections` exists. A5 was loaded at 07:41 without Traffic data, so the flag stayed armed. Our import wrote the first such nodes at 08:29:57, and the system validated them in the same frame (Logs/Traffic.Mod.log).
+- **The same validation runs after every save and load,** so the data has to pass it in any case.
+
+**What `ValidateLoadedDataJob` rejects.** It removes **all** of a node's data when any `ModifiedLaneConnections` item fails:
+- the `modifiedConnections` entity is null or missing;
+- `edgeEntity` is not an `Edge`;
+- any connected edge lacks `Composition`, or the node's composition is a **roundabout**;
+- `edgeEntity` is not a road, track or bicycle edge of the node;
+- `laneIndex` is not a key of that edge composition's `NetCompositionLane` buffer, among the lanes flagged Slave, Road, Track or BicyclesOnly;
+- no `GeneratedConnection` buffer;
+- a connection whose `sourceEntity` ≠ `edgeEntity`, whose target is not such an edge, or whose `laneIndexMap.y` is not a valid lane of the target;
+- `method` Road onto a target without `RoadComposition`, Bicycle without a bike lane, or Track without track types (unless unsafe).
+
+`ValidateLoadedReferencesJob` then deletes any `DataOwner` entity whose owner node lacks the buffer or does not reference it.
+
+**Comparison with our writer.** It writes the same structure (`DataOwner`, `PrefabRef` FakePrefab, `GeneratedConnection`, node `ModifiedConnections`), and lane indices come from `Lane.m_StartNode.GetLaneIndex() & 0xFF`, exactly as Traffic's own `GenerateConnectorsSystem` computes them. So the rejected items are per-node conditions above, such as a roundabout node, a connected edge with no road/track composition, or a lane index outside the flagged composition lanes. They cannot be read back: Traffic deleted the data, and its log gives only counts.
+
+**0.9.26:**
+- **Pre-validation:** the importer runs a port of Traffic's checks before writing (`ValidateLikeTraffic`, dry run included). A source lane that would fail is skipped with `reason: "Traffic validation: <rule>"`, so Traffic never sees invalid data and never drops a whole node.
+- **Node matching in x/z only:** previously it was 3D, and CS1 and CS2 heights differ (n27789 "nearest 167 m"). Every node within `options.nodeSearchRadius` (default 60 m) is scored by how well its edges pass the probe points of the CS1 segments the node's data uses. The node matching the most segments wins, ties broken by mean probe distance + 0.1 × x/z distance. A node farther than `nodeRadius` (12 m) is accepted only if its edges carry every segment. `nodes[].match` reports "k/n CS1 segments matched".
+- **Next run:** after the restart, a **dry run** of the same body names the rule each of the former 7 nodes breaks and shows whether the 8 skipped nodes now match. Then import for real and check that Traffic shows no "couldn't load" dialog after save and reload.

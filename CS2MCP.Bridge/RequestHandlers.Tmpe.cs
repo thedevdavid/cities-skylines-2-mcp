@@ -145,6 +145,8 @@ namespace CS2MCP
         public bool dryRun;
         public bool replace;
         public float nodeRadius = 12f;
+        /// <summary>0.9.26: x/z radius within which nodes are scored by their edges against the CS1 segment probes.</summary>
+        public float nodeSearchRadius = 60f;
         public float edgeTolerance = 8f;
     }
 

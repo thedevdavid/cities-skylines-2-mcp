@@ -109,25 +109,67 @@ namespace CS2MCP
 
             foreach (TmpeNodeDto nodeDto in body.nodes)
             {
-                var wanted = new float3(nodeDto.x, nodeDto.y, nodeDto.z);
+                // 0.9.26: match in x/z only (CS1 and CS2 heights differ; stacked interchange nodes are
+                // told apart by their edges), scoring every node within nodeSearchRadius by how well
+                // its edges pass the probe points of the CS1 segments this node's data refers to.
                 Entity node = Entity.Null;
                 float best = float.MaxValue;
                 float3 position = default;
-                foreach ((Entity entity, float3 p) in netNodes)
+                string matchNote = null;
                 {
-                    float d = math.distance(p, wanted);
-                    if (d < best)
+                    var wantedXZ = new float2(nodeDto.x, nodeDto.z);
+                    List<TmpeSegmentRefDto> refs = SegmentRefs(nodeDto);
+                    int bestMatched = -1;
+                    float bestScore = float.MaxValue;
+                    float searchRadius = math.max(options.nodeRadius, options.nodeSearchRadius);
+                    foreach ((Entity entity, float3 p) in netNodes)
                     {
-                        best = d;
-                        node = entity;
-                        position = p;
+                        float dxz = math.distance(p.xz, wantedXZ);
+                        if (dxz > searchRadius)
+                        {
+                            continue;
+                        }
+                        int matched = 0;
+                        float sum = 0f;
+                        if (refs.Count > 0)
+                        {
+                            List<EdgeAtNode> candidateEdges = CollectEdges(em, entity);
+                            foreach (TmpeSegmentRefDto r in refs)
+                            {
+                                MatchEdge(candidateEdges, r, float.MaxValue, out float d);
+                                sum += math.min(d, 1000f);
+                                if (d <= options.edgeTolerance)
+                                {
+                                    matched++;
+                                }
+                            }
+                        }
+                        float score = (refs.Count > 0 ? sum / refs.Count : 0f) + 0.1f * dxz;
+                        if (matched > bestMatched || (matched == bestMatched && score < bestScore))
+                        {
+                            bestMatched = matched;
+                            bestScore = score;
+                            node = entity;
+                            position = p;
+                            best = dxz;
+                        }
+                    }
+                    if (node != Entity.Null && refs.Count > 0)
+                    {
+                        matchNote = $"{bestMatched}/{refs.Count} CS1 segments matched by edges";
+                        // Accept a node farther than nodeRadius only when its edges carry every segment.
+                        if (best > options.nodeRadius && bestMatched < refs.Count)
+                        {
+                            best = float.MaxValue;
+                        }
                     }
                 }
 
                 string nodeSkip = null;
-                if (node == Entity.Null || best > options.nodeRadius)
+                if (node == Entity.Null || best > math.max(options.nodeRadius, options.nodeSearchRadius))
                 {
-                    nodeSkip = $"no CS2 net node within {options.nodeRadius} m of ({nodeDto.x:F1}, {nodeDto.y:F1}, {nodeDto.z:F1}) (nearest {best:F1} m)";
+                    nodeSkip = $"no CS2 net node within {options.nodeSearchRadius} m (x/z) of ({nodeDto.x:F1}, {nodeDto.z:F1}) whose edges carry this node's CS1 segments" +
+                        (matchNote != null ? $" (best: {matchNote})" : "");
                 }
                 else if (em.HasComponent<ModifiedConnections>(node) && !options.replace)
                 {
@@ -139,6 +181,7 @@ namespace CS2MCP
                     cs1Node = nodeDto.cs1Node,
                     cs2Node = nodeSkip == null || best <= options.nodeRadius ? Id(node) : null,
                     distance = Round(best),
+                    match = matchNote,
                     status = nodeSkip == null ? "matched" : "skipped",
                     reason = nodeSkip,
                 });
@@ -203,6 +246,21 @@ namespace CS2MCP
                         else
                         {
                             r["status"] = options.dryRun ? "mapped" : "created";
+                        }
+                    }
+                    if (failure == null)
+                    {
+                        // 0.9.26: the checks of Traffic's TrafficDataMigrationSystem.ValidateLoadedDataJob,
+                        // run here so data Traffic would drop on the next load (or on the first write after
+                        // a load) is never written; the failing rule is reported per connection.
+                        failure = ValidateLikeTraffic(em, plan.Node, group.Edge.Edge, group.Lane, generated);
+                        if (failure != null)
+                        {
+                            foreach (Dictionary<string, object> r in group.Results)
+                            {
+                                r["status"] = "skipped";
+                                r["reason"] = "Traffic validation: " + failure;
+                            }
                         }
                     }
                     if (failure == null)
@@ -497,6 +555,114 @@ namespace CS2MCP
                 OffsetDelta = bestDelta,
                 RankAgrees = lanes.IndexOf(bestLane) == end.rank,
             };
+        }
+
+        /// <summary>Every CS1 segment reference (with a probe) in a node's connections and arrows.</summary>
+        private static List<TmpeSegmentRefDto> SegmentRefs(TmpeNodeDto node)
+        {
+            var refs = new List<TmpeSegmentRefDto>();
+            var seen = new HashSet<int>();
+            void Add(TmpeSegmentRefDto r)
+            {
+                if (r != null && r.probe != null && r.probe.Length >= 2 && seen.Add(r.segment))
+                {
+                    refs.Add(r);
+                }
+            }
+            foreach (TmpeConnectionDto c in node.connections ?? new List<TmpeConnectionDto>())
+            {
+                Add(c.source);
+                Add(c.target);
+            }
+            foreach (TmpeArrowDto a in node.arrows ?? new List<TmpeArrowDto>())
+            {
+                Add(a.source);
+                foreach (TmpeArrowTargetDto t in a.targets ?? new List<TmpeArrowTargetDto>())
+                {
+                    Add(t);
+                }
+            }
+            return refs;
+        }
+
+        /// <summary>
+        /// Port of Traffic 0.2.13 TrafficDataMigrationSystem.ValidateLoadedDataJob
+        /// (FillEdgeCompositions + ValidateLaneConnectionsSettings + TryFixGeneratedConnections):
+        /// returns the first rule the data breaks, or null. Traffic drops the WHOLE node when one item
+        /// fails, so a failing source lane must not be written.
+        /// </summary>
+        private static string ValidateLikeTraffic(EntityManager em, Entity node, Entity sourceEdge, int sourceLane, List<GeneratedConnection> generated)
+        {
+            DynamicBuffer<ConnectedEdge> connected = em.GetBuffer<ConnectedEdge>(node, true);
+            var lanesByEdge = new Dictionary<Entity, (bool road, bool track, HashSet<int> lanes)>();
+            for (int i = 0; i < connected.Length; i++)
+            {
+                Entity e = connected[i].m_Edge;
+                if (!em.HasComponent<Composition>(e))
+                {
+                    return $"connected edge {Id(e)} has no Composition (Traffic rejects the node)";
+                }
+                Composition composition = em.GetComponentData<Composition>(e);
+                if (i == 0)
+                {
+                    bool isEnd = em.GetComponentData<Edge>(e).m_End == node;
+                    Entity nodeComposition = isEnd ? composition.m_EndNode : composition.m_StartNode;
+                    if (em.HasComponent<NetCompositionData>(nodeComposition)
+                        && (em.GetComponentData<NetCompositionData>(nodeComposition).m_Flags.m_General & CompositionFlags.General.Roundabout) != 0)
+                    {
+                        return "the node is a roundabout (Traffic keeps no lane connections there)";
+                    }
+                }
+                Entity edgeComposition = composition.m_Edge;
+                if (!em.HasBuffer<NetCompositionLane>(edgeComposition))
+                {
+                    continue;
+                }
+                bool road = em.HasComponent<RoadComposition>(edgeComposition);
+                bool track = em.HasComponent<TrackComposition>(edgeComposition) && em.GetComponentData<TrackComposition>(edgeComposition).m_TrackType != TrackTypes.None;
+                var lanes = new HashSet<int>();
+                DynamicBuffer<NetCompositionLane> buffer = em.GetBuffer<NetCompositionLane>(edgeComposition, true);
+                for (int j = 0; j < buffer.Length; j++)
+                {
+                    if ((buffer[j].m_Flags & (LaneFlags.Slave | LaneFlags.Road | LaneFlags.Track | LaneFlags.BicyclesOnly)) != 0)
+                    {
+                        lanes.Add(j);
+                        track |= (buffer[j].m_Flags & LaneFlags.Track) != 0;
+                    }
+                }
+                if (road || track)
+                {
+                    lanesByEdge[e] = (road, track, lanes);
+                }
+            }
+            if (!lanesByEdge.TryGetValue(sourceEdge, out var source))
+            {
+                return $"source edge {Id(sourceEdge)} is not a road/track edge connected to node {Id(node)}";
+            }
+            if (!source.lanes.Contains(sourceLane))
+            {
+                return $"source lane index {sourceLane} is not a road/track lane of edge {Id(sourceEdge)}'s composition (valid: {string.Join(",", source.lanes)})";
+            }
+            foreach (GeneratedConnection c in generated)
+            {
+                if (c.sourceEntity != sourceEdge)
+                {
+                    return $"connection source {Id(c.sourceEntity)} differs from the item's edge {Id(sourceEdge)}";
+                }
+                if (!lanesByEdge.TryGetValue(c.targetEntity, out var target))
+                {
+                    return $"target edge {Id(c.targetEntity)} is not a road/track edge connected to node {Id(node)}";
+                }
+                if (!target.lanes.Contains(c.laneIndexMap.y))
+                {
+                    return $"target lane index {c.laneIndexMap.y} is not a road/track lane of edge {Id(c.targetEntity)}'s composition (valid: {string.Join(",", target.lanes)})";
+                }
+                if ((c.method & PathMethod.Road) != 0 && !target.road)
+                {
+                    return $"road connection onto edge {Id(c.targetEntity)}, whose composition has no RoadComposition";
+                }
+            }
+            return null;
         }
 
         private static EdgeAtNode MatchEdge(List<EdgeAtNode> edges, TmpeSegmentRefDto segment, float tolerance, out float bestDistance)
