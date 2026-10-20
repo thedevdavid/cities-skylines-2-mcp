@@ -638,3 +638,17 @@ All test entities were removed afterwards.
 - **Objects too:** trees, props and rocks under every surface imported before 0.9.26 were also deleted. netGuard tracks only nets.
 - **Incomplete areas remain:** surfaces already imported are stored as incomplete areas. Re-import them with 0.9.26 (undo and import, or rebuild the map) so they are `Complete` like hand-painted ones.
 - **Order:** importing surfaces before networks also avoided the loss, because nets placed over a surface keep both. 0.9.26 makes the order irrelevant.
+
+## Round 27 (0.9.27, offline against A-v6): TM:PE node and edge matching
+
+**A-v6 dry run (0.9.26):** 20 of 27 nodes matched, but only 9 of 68 connections mapped. Two causes, both visible in `live-graph-20261020-193334-end.json`:
+- **Node position versus curves.** The game's node reduction leaves `Node.m_Position` where the import put it, but the edge curves meet elsewhere. At CS2 node 54722 (CS1 n4378) the curves meet at (−439.6, 3924.8), 25.8 m from the node position. Node 55295 (n12156) is 24 m off. The matcher measured node distance from `m_Position`, and matched edges by the point **20 m along the curve from the node** (probeDist). That point was 14–24 m off the CS1 probe, beyond the 8 m tolerance, so it reported "0/2 CS1 segments matched".
+- **No node at all.** Six CS1 nodes (n527, n1884, n4801, n6802, n10611, n15971) join two collinear segments of one prefab. The game merged those segments, so no CS2 node exists there. Their TM:PE connections are all lane rank i → rank i with equal lane counts, which is the default straight-through behaviour.
+
+**0.9.27 fixes:**
+- **Edges by shape:** an edge matches by the **perpendicular distance from the CS1 probe to the whole edge curve**, provided the edge leaves the node in the CS1 segment's direction (dot ≥ 0.5). Distance along the curve no longer matters.
+- **Node position:** candidate distance is measured from the **point where the node's edge curves meet**. That point is also used for lane-side detection.
+- **Acceptance:** within `nodeRadius` (12 m); or anywhere within `nodeSearchRadius` if the node's edges carry every segment; or within 2 × `nodeRadius` if all but one segment (at least 2) match.
+- **Merged-away nodes:** a node with no CS2 counterpart whose connections are all straight identity mappings is reported as **`notNeeded`**, not skipped.
+- **Offline replay** of the A-v6 graph with a JS port of the matcher: 21 matched, 6 notNeeded, 0 skipped (A-v5 had 19 matched). The lane mapping per connection still has to be shown by the next dry run.
+- **Nodes already holding Traffic data:** the 0.9.26 import already wrote data at some nodes, which are now skipped as "already has Traffic lane connections". Rerun with `--replace` to rebuild them with the new matcher.

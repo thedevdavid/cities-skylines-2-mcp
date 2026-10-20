@@ -122,8 +122,17 @@ namespace CS2MCP
                     int bestMatched = -1;
                     float bestScore = float.MaxValue;
                     float searchRadius = math.max(options.nodeRadius, options.nodeSearchRadius);
-                    foreach ((Entity entity, float3 p) in netNodes)
+                    foreach ((Entity entity, float3 nodePosition) in netNodes)
                     {
+                        // Cheap pre-filter on Node.m_Position, then the curve meeting point: the
+                        // game's node reduction can leave m_Position up to tens of metres from where
+                        // the edge curves actually meet (A-v6: node 54722, 25.8 m).
+                        if (math.distance(nodePosition.xz, wantedXZ) > searchRadius + 60f)
+                        {
+                            continue;
+                        }
+                        List<EdgeAtNode> candidateEdges = CollectEdges(em, entity);
+                        float3 p = EffectivePosition(candidateEdges, nodePosition);
                         float dxz = math.distance(p.xz, wantedXZ);
                         if (dxz > searchRadius)
                         {
@@ -133,7 +142,6 @@ namespace CS2MCP
                         float sum = 0f;
                         if (refs.Count > 0)
                         {
-                            List<EdgeAtNode> candidateEdges = CollectEdges(em, entity);
                             foreach (TmpeSegmentRefDto r in refs)
                             {
                                 MatchEdge(candidateEdges, r, float.MaxValue, out float d);
@@ -157,8 +165,9 @@ namespace CS2MCP
                     if (node != Entity.Null && refs.Count > 0)
                     {
                         matchNote = $"{bestMatched}/{refs.Count} CS1 segments matched by edges";
-                        // Accept a node farther than nodeRadius only when its edges carry every segment.
-                        if (best > options.nodeRadius && bestMatched < refs.Count)
+                        // Farther than nodeRadius: only when its edges carry every segment, or all but one (at least 2) within 2 x nodeRadius.
+                        if (best > options.nodeRadius && bestMatched < refs.Count
+                            && !(bestMatched >= 2 && bestMatched >= refs.Count - 1 && best <= 2f * options.nodeRadius))
                         {
                             best = float.MaxValue;
                         }
@@ -175,6 +184,15 @@ namespace CS2MCP
                 {
                     nodeSkip = $"CS2 node {Id(node)} already has Traffic lane connections; reset it in the Lane Connector or run with replace (--replace)";
                 }
+                string skipStatus = "skipped";
+                if (nodeSkip != null && node == Entity.Null || (nodeSkip != null && best == float.MaxValue))
+                {
+                    if (IsStraightIdentity(nodeDto))
+                    {
+                        skipStatus = "notNeeded";
+                        nodeSkip = "no CS2 node here: the game joined the two collinear CS1 segments into one, and every TM:PE connection at this node is lane i -> lane i straight through (the game's default), so there is nothing to write";
+                    }
+                }
                 nodeResults.Add(new
                 {
                     id = nodeDto.id,
@@ -182,26 +200,26 @@ namespace CS2MCP
                     cs2Node = nodeSkip == null || best <= options.nodeRadius ? Id(node) : null,
                     distance = Round(best),
                     match = matchNote,
-                    status = nodeSkip == null ? "matched" : "skipped",
+                    status = nodeSkip == null ? "matched" : skipStatus,
                     reason = nodeSkip,
                 });
                 if (nodeSkip != null)
                 {
                     foreach (TmpeConnectionDto c in nodeDto.connections)
                     {
-                        connectionResults.Add(Result(c.id, nodeDto, "skipped", nodeSkip));
+                        connectionResults.Add(Result(c.id, nodeDto, skipStatus, nodeSkip));
                     }
                     foreach (TmpeArrowDto a in nodeDto.arrows)
                     {
-                        Dictionary<string, object> r = Result(a.id, nodeDto, "skipped", nodeSkip);
+                        Dictionary<string, object> r = Result(a.id, nodeDto, skipStatus, nodeSkip);
                         r["arrows"] = a.arrows;
                         arrowResults.Add(r);
                     }
                     continue;
                 }
 
-                var plan = new NodePlan { Dto = nodeDto, Node = node, Position = position };
                 List<EdgeAtNode> edges = CollectEdges(em, node);
+                var plan = new NodePlan { Dto = nodeDto, Node = node, Position = EffectivePosition(edges, position) };
                 PlanConnections(em, plan, edges, options, connectionResults);
                 PlanArrows(em, plan, edges, options, arrowResults);
                 plans.Add(plan);
@@ -665,6 +683,11 @@ namespace CS2MCP
             return null;
         }
 
+        /// <summary>
+        /// 0.9.27: the edge whose curve passes nearest the CS1 probe point (perpendicular distance to
+        /// the whole curve, not the point at probeDist along it) and that leaves the node in the CS1
+        /// segment's direction (dot >= 0.5). Robust to the game moving or removing degree-2 nodes.
+        /// </summary>
         private static EdgeAtNode MatchEdge(List<EdgeAtNode> edges, TmpeSegmentRefDto segment, float tolerance, out float bestDistance)
         {
             bestDistance = float.MaxValue;
@@ -674,9 +697,18 @@ namespace CS2MCP
                 return null;
             }
             var probe = new float2(segment.probe[0], segment.probe[1]);
+            float2 dir = segment.dir != null && segment.dir.Length >= 2 ? math.normalizesafe(new float2(segment.dir[0], segment.dir[1])) : float2.zero;
             foreach (EdgeAtNode edge in edges)
             {
-                float d = math.distance(PointAt(edge, segment.probeDist), probe);
+                if (math.lengthsq(dir) > 0f)
+                {
+                    float2 outward = math.normalizesafe(PointAt(edge, math.min(10f, edge.Distance[edge.Distance.Length - 1])) - edge.Samples[0].xz);
+                    if (math.dot(outward, dir) < 0.5f)
+                    {
+                        continue;
+                    }
+                }
+                float d = math.distance(NearestSample(edge, probe), probe);
                 if (d < bestDistance)
                 {
                     bestDistance = d;
@@ -684,6 +716,49 @@ namespace CS2MCP
                 }
             }
             return bestDistance <= tolerance ? best : null;
+        }
+
+        /// <summary>Where the node's edge curves actually meet (mean of their node-side ends).</summary>
+        private static float3 EffectivePosition(List<EdgeAtNode> edges, float3 fallback)
+        {
+            if (edges.Count == 0)
+            {
+                return fallback;
+            }
+            float3 sum = float3.zero;
+            foreach (EdgeAtNode e in edges)
+            {
+                sum += e.Samples[0];
+            }
+            return sum / edges.Count;
+        }
+
+        /// <summary>
+        /// A CS1 node joining exactly two opposite segments whose every connection maps lane rank i to
+        /// rank i with equal lane counts, and no arrows: TM:PE data that only restates the default.
+        /// </summary>
+        private static bool IsStraightIdentity(TmpeNodeDto node)
+        {
+            if (node.connections == null || node.connections.Count == 0 || (node.arrows != null && node.arrows.Exists(a => !a.supersededByConnections)))
+            {
+                return false;
+            }
+            var segments = new HashSet<int>();
+            foreach (TmpeConnectionDto c in node.connections)
+            {
+                if (c.source == null || c.target == null || c.source.rank != c.target.rank || c.source.laneCount != c.target.laneCount)
+                {
+                    return false;
+                }
+                segments.Add(c.source.segment);
+                segments.Add(c.target.segment);
+                if (c.source.dir != null && c.target.dir != null && c.source.dir.Length >= 2 && c.target.dir.Length >= 2
+                    && c.source.dir[0] * c.target.dir[0] + c.source.dir[1] * c.target.dir[1] > -0.9f)
+                {
+                    return false;
+                }
+            }
+            return segments.Count == 2;
         }
 
         private static float2 PointAt(EdgeAtNode edge, float distance)
