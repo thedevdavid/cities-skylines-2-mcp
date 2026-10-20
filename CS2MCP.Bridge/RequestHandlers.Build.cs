@@ -209,6 +209,11 @@ namespace CS2MCP
             string category = request.Query.TryGetValue("category", out string rawCategory)
                 ? rawCategory.ToLowerInvariant()
                 : "building";
+            Type lookType = LookType(category);
+            if (lookType != null)
+            {
+                return LookPrefabs(request, lookType);
+            }
             EntityQuery query;
             switch (category)
             {
@@ -238,7 +243,7 @@ namespace CS2MCP
                     query = ThemePrefabQuery;
                     break;
                 default:
-                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), 'tree', 'object' (all object prefabs incl. props and decals), 'surface', 'climate' or 'theme'");
+                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), 'tree', 'object' (all object prefabs incl. props and decals), 'surface', 'climate', 'waterRenderSettings', 'terrainRenderSettings' or 'theme'");
             }
 
             request.Query.TryGetValue("query", out string search);

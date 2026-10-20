@@ -34,6 +34,12 @@ namespace CS2MCP
         {
             public string theme;
             public string climate;
+            public string waterRenderSettings;
+            public string terrainRenderSettings;
+            /// <summary>Field edits on the current climate (cloned first when read-only), e.g. {"latitude": 47.5, "seasons": [{"index": 0, "tempNightDay": [1, 10]}]}.</summary>
+            public Newtonsoft.Json.Linq.JObject climateEdit;
+            public Newtonsoft.Json.Linq.JObject waterEdit;
+            public Newtonsoft.Json.Linq.JObject terrainEdit;
             public float? latitude;
             public float? longitude;
             public float? seaLevel;
@@ -126,12 +132,14 @@ namespace CS2MCP
                 }
             }
             object settings = ReadMapSettings(editor);
+            bool detail = request.Query.TryGetValue("detail", out string rawDetail) && (rawDetail == "1" || rawDetail == "true");
             return BridgeResponse.Json(new
             {
                 mode = editor ? "editor" : "game",
                 applied = request.Method == "POST" ? applied : null,
                 problems = request.Method == "POST" ? problems : null,
                 settings,
+                look = ReadLook(detail),
                 notWritable = new[]
                 {
                     "name", "description", "preview", "thumbnail", "startingTiles (count is reported; select them in the editor)",
@@ -225,16 +233,27 @@ namespace CS2MCP
             // coordinates and the climate panel copies them over on its next change.
             if (!string.IsNullOrEmpty(body.climate))
             {
-                if (prefabs.TryGetPrefab(new PrefabID(nameof(ClimatePrefab), body.climate), out PrefabBase climatePrefab)
-                    && prefabs.TryGetEntity(climatePrefab, out Entity climateEntity))
-                {
-                    World.GetOrCreateSystemManaged<ClimateSystem>().currentClimate = climateEntity;
-                    applied.Add("climate");
-                }
-                else
-                {
-                    problems.Add($"unknown climate prefab '{body.climate}'; available: {PrefabNames(ClimatePrefabQuery)}");
-                }
+                SelectLook(typeof(ClimatePrefab), body.climate, applied, problems, "climate");
+            }
+            if (!string.IsNullOrEmpty(body.waterRenderSettings))
+            {
+                SelectLook(typeof(Game.Prefabs.Water.WaterRenderSettingsPrefab), body.waterRenderSettings, applied, problems, "waterRenderSettings");
+            }
+            if (!string.IsNullOrEmpty(body.terrainRenderSettings))
+            {
+                SelectLook(typeof(Game.Prefabs.Terrain.TerrainRenderSettingsPrefab), body.terrainRenderSettings, applied, problems, "terrainRenderSettings");
+            }
+            if (body.climateEdit != null)
+            {
+                EditLook(typeof(ClimatePrefab), body.climateEdit, applied, problems, "climateEdit");
+            }
+            if (body.waterEdit != null)
+            {
+                EditLook(typeof(Game.Prefabs.Water.WaterRenderSettingsPrefab), body.waterEdit, applied, problems, "waterEdit");
+            }
+            if (body.terrainEdit != null)
+            {
+                EditLook(typeof(Game.Prefabs.Terrain.TerrainRenderSettingsPrefab), body.terrainEdit, applied, problems, "terrainEdit");
             }
             PlanetarySystem planet = World.GetOrCreateSystemManaged<PlanetarySystem>();
             if (body.latitude.HasValue)

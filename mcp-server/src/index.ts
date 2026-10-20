@@ -366,17 +366,19 @@ server.registerTool(
       "'FireHouse', 'WindTurbine', 'Highway'.",
     inputSchema: {
       category: z
-        .enum(["building", "road", "net", "tree", "object", "surface", "climate", "theme"])
+        .enum(["building", "road", "net", "tree", "object", "surface", "climate", "waterRenderSettings", "terrainRenderSettings", "theme"])
         .optional()
         .describe("Prefab category (default building); 'net' = all networks incl. train tracks, seaways, pipes, power lines, paths; 'object' = every object prefab (props, decals, rocks, bushes, markers, trees, buildings, incl. PDX Mods assets); 'surface' = surface areas"),
       query: z.string().optional().describe("Case-insensitive name substring filter"),
       limit: z.number().int().min(1).max(1000).optional().describe("Max results (default 50)"),
       offset: z.number().int().min(0).optional().describe("Skip this many matches (paging)"),
+      detail: z.boolean().optional().describe("climate / waterRenderSettings / terrainRenderSettings: include every field of each prefab"),
     },
   },
-  async ({ category, query, limit, offset }) => {
+  async ({ category, query, limit, offset, detail }) => {
     const params = new URLSearchParams();
     if (category) params.set("category", category);
+    if (detail) params.set("detail", "1");
     if (query) params.set("query", query);
     if (limit) params.set("limit", String(limit));
     if (offset) params.set("offset", String(offset));
@@ -2254,6 +2256,14 @@ server.registerTool(
         .object({
           theme: z.string().optional(),
           climate: z.string().optional(),
+          waterRenderSettings: z.string().optional().describe("WaterRenderSettingsPrefab name (cs2_find_prefabs category waterRenderSettings)"),
+          terrainRenderSettings: z.string().optional().describe("TerrainRenderSettingsPrefab name"),
+          climateEdit: z
+            .record(z.any())
+            .optional()
+            .describe("Field edits on the current climate, cloned first if read-only (as the editor's Edit climate): e.g. {latitude, longitude, freezingTemperature, randomSeed, seasons:[{index, tempNightDay:[n,d], cloudChance, precipitationAmount, ...}]}"),
+          waterEdit: z.record(z.any()).optional().describe("Field edits on the current water render settings, e.g. {waterColor:'#2a6f6a', absorptionDistance: 6, waterScatteringColor:[r,g,b]}"),
+          terrainEdit: z.record(z.any()).optional().describe("Field edits on the current terrain render settings (numbers/nested objects; textures are not settable)"),
           latitude: z.number().optional(),
           longitude: z.number().optional(),
           seaLevel: z.number().optional(),
@@ -2270,11 +2280,12 @@ server.registerTool(
           cameraZoom: z.number().optional(),
         })
         .optional(),
+      detail: z.boolean().optional().describe("Read: include every field of the current climate / water / terrain render settings"),
     },
   },
-  async ({ set }) => {
+  async ({ set, detail }) => {
     try {
-      if (!set) return jsonResult(await bridgeJson("/map/settings"));
+      if (!set) return jsonResult(await bridgeJson(detail ? "/map/settings?detail=1" : "/map/settings"));
       const { ok, payload } = await bridgePost("/map/settings", set, 30_000);
       return ok ? jsonResult(payload) : { ...jsonResult(payload), isError: true };
     } catch (err) {

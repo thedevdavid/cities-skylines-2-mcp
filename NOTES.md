@@ -509,3 +509,14 @@ The prefab class was already reported as `type`.
   - that the deletion survives a save and load.
 
   If it fails, Pillar Spacing (162558) is the global alternative.
+
+## Round 23 (0.9.23, offline): automatic dam, map look settings
+
+**Dam:** the game has no dam tool. `Hydroelectric_Power_Plant_01 Dam` is a bridge-type `RoadPrefab`: `Bridge.m_WaterFlow` sets `FlowLeft`/`FlowRight`. Its `CourseStart`/`CourseEnd` sub-objects become course objects.
+- **What the net tool does:** it spawns the `MakeOwner` one (the plant) at a course end and makes the dam edges the plant's sub-nets. `WaterPowered` then sums those edges.
+- **What the importer now does:** `/import/network` does the same, along with the tool's flow orientation. The contract is in IMPORT_SCHEMA.md "Dams": one level edge, abutments on the ground, `flow`.
+- **Pre-checks:** `dam.single`, `dam.level`, `dam.elevation` and `dam.flow`.
+- **Unverified in game:** which end the plant takes, the FlowLeft/Right flag, and whether HydroelectricPowerPlant01_End is the other course object. The dry run shows all three.
+- **Undo** does not remove the plant yet.
+
+**Look:** climate, water render settings and terrain render settings can be listed, selected and edited field by field (MAP_SETTINGS.md "Look"). An edit clones a read-only prefab, as the editor's Edit buttons do. A map-specific latitude/longitude is therefore possible through a climate copy, which is saved into the map.
