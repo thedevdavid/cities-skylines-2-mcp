@@ -7,7 +7,7 @@ namespace CS2MCP
     public sealed class Mod : IMod
     {
         public const string Name = "CS2MCP";
-        public const string Version = "0.9.28-editor-import";
+        public const string Version = "0.9.29-editor-import";
 
         public static readonly ILog Log = LogManager.GetLogger(Name).SetShowsErrorsInUI(false);
 

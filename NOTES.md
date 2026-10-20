@@ -677,3 +677,15 @@ All test entities were removed afterwards.
 1. Dry-run the TM:PE import. `selfCheck` should show composition-style lane indices (e.g. 2, 3 rather than 0, 1) with lane counts equal to CS1's.
 2. Check that no connection is skipped by "Traffic validation".
 3. Import, save, reload: Traffic must show no "couldn't load" dialog.
+
+## Round 29 (0.9.29, offline): terrain material painting; folded network courses
+
+**Terrain material painting:**
+- **Endpoints:** `GET /map/terrain-materials`; `POST /import/terrain-paint` with polygons or strokes, a dry run, and netGuard; `POST /import/terrain-paint/undo`. Details in IMPORT_SCHEMA.md "Terrain material painting".
+- **Materials** come from the editor's Materials row: `Terrain Material Extra 1–4` (Dry, Lush, Dirt, Sand; the en-US Locale descriptions) and `Terrain Material Clear`. Each paints a slot of the terrain render settings.
+- **No rock material:** rock on slopes is automatic in the terrain shader.
+- **Painting** is `TerrainMaterialSystem.ApplyBrush` per stamp, writing the user splatmaps that are saved with the map.
+
+**`/import/network` folded courses:**
+- **The problem:** when the game folds a course into an **older** neighbour segment, and re-splits it on its grid, the segment keeps its entity. It is then neither new in the batch nor recorded by this import, so the course was reported failed although it is there. Examples: A-v6 gravel `e23168_0`, `e31265_0`, `e31665_0`, `e36006_0`.
+- **The fix:** a second pass checks the course's sample points against **all** live segments of the prefab. If they are covered, the edge is `merged` with "folded by the game into existing segment …". Those older segments are not added to this import's undo.

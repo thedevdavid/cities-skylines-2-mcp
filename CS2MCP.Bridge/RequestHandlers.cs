@@ -207,6 +207,12 @@ namespace CS2MCP
                     return ImportResources(request);
                 case "/map/resources":
                     return ReadResources(request);
+                case "/map/terrain-materials":
+                    return TerrainMaterials();
+                case "/import/terrain-paint":
+                    return TerrainPaint(request);
+                case "/import/terrain-paint/undo":
+                    return TerrainPaintUndo(request);
                 case "/net/count":
                     return NetCount();
                 case "/map/look/schema":

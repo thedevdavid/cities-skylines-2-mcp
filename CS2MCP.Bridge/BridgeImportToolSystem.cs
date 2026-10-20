@@ -1396,6 +1396,25 @@ namespace CS2MCP
                     }
                 }
 
+                if (covered < kCourseSamples.Length && CoveredByExisting(edge, course, tolerance, out List<Entity> existing))
+                {
+                    // 0.9.29: the game folded the course into an older neighbour segment (and may re-split it),
+                    // which keeps its entity, so it is neither new in this batch nor recorded by this import.
+                    // The course is there; report it, but keep those segments out of this import's undo record.
+                    edge.Segments.Clear();
+                    edge.Segments.AddRange(existing);
+                    edge.Status = "merged";
+                    var folded = new List<string>();
+                    foreach (Entity segment in existing)
+                    {
+                        folded.Add($"{segment.Index}:{segment.Version}");
+                    }
+                    edge.Error = "folded by the game into existing segment " + string.Join(", ", folded) +
+                        " (built before this batch; not part of this import's undo)";
+                    ResolveEndNode(nodeA, edge.Segments);
+                    ResolveEndNode(nodeB, edge.Segments);
+                    continue;
+                }
                 if (covered < kCourseSamples.Length)
                 {
                     edge.Status = "failed";
@@ -1441,6 +1460,48 @@ namespace CS2MCP
         }
 
         private static readonly float[] kCourseSamples = { 0.2f, 0.5f, 0.8f };
+
+        /// <summary>Every sample point of the course lies on some live segment of the prefab (any age).</summary>
+        private bool CoveredByExisting(ImportEdge edge, Bezier4x2 course, float tolerance, out List<Entity> segments)
+        {
+            segments = new List<Entity>();
+            using (NativeArray<Entity> edges = m_EdgeQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (float t in kCourseSamples)
+                {
+                    float2 sample = MathUtils.Position(course, t);
+                    Entity best = Entity.Null;
+                    float bestDistance = tolerance;
+                    foreach (Entity e in edges)
+                    {
+                        if (EntityManager.GetComponentData<PrefabRef>(e).m_Prefab != edge.Prefab)
+                        {
+                            continue;
+                        }
+                        Bezier4x2 curve = EntityManager.GetComponentData<Curve>(e).m_Bezier.xz;
+                        if (!InBounds(curve, sample, bestDistance))
+                        {
+                            continue;
+                        }
+                        float distance = MathUtils.Distance(curve, sample, out _);
+                        if (distance < bestDistance)
+                        {
+                            bestDistance = distance;
+                            best = e;
+                        }
+                    }
+                    if (best == Entity.Null)
+                    {
+                        return false;
+                    }
+                    if (!segments.Contains(best))
+                    {
+                        segments.Add(best);
+                    }
+                }
+            }
+            return true;
+        }
 
         /// <summary>
         /// Why an applied course left no segment: if it runs inside one existing

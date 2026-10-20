@@ -381,3 +381,62 @@ Statuses: connections `created` / `mapped` (dry run) / `skipped`; arrows also `s
 - **Dry runs:** `dryRun` is honoured in `options` and, since 0.9.12, also at the top level of the body (network, objects, surfaces). The MCP tools `cs2_import_network`, `cs2_import_objects` and `cs2_import_surfaces` have a top-level `dryRun` parameter that overrides the file's `options.dryRun`. Before 0.9.12, a top-level `dryRun` passed to the MCP tool was silently dropped by its schema, and the import ran for real.
 - **Object kinds:** the bridge classifies a prefab as `building` when it carries `BuildingData`, i.e. a `BuildingPrefab`: zoned, service, signature and unique buildings, and the vanilla editor's building tab. Static objects that look like buildings but are `StaticObjectPrefab`s (piers such as `LeisurePier01HeadSmall`, `ElectricalSubstation01`) are `object`. A `kind: "building"` hint on those only produces a warning; placement is the same.
 - **Climate and theme names:** `GET /prefabs?category=climate` and `category=theme` list them (0.9.12). An unknown `climate` or `theme` in `POST /map/settings` now lists the available names.
+
+## Terrain material painting (`POST /import/terrain-paint`, 0.9.29)
+
+This is the editor's **Terrain → Materials** brushes, not area surfaces. They paint the terrain's user splatmaps, which give soft-edged ground textures under everything, and they are saved with the map.
+
+**How the game does it** (decompiled):
+- **Pipeline:** `TerrainToolSystem` with a `TerraformingPrefab` whose `m_Target` is `Material` → `ApplyBrushesSystem` → `TerrainMaterialSystem.ApplyBrush(Brush, BrushPrefab)`. That runs a paint or erase compute kernel on `m_UserSplatmap` (4096 × 4096 RG8 over the playable area, about 3.5 m/px) and `m_UserSplatmapWorld` (1024 × 1024 over the world).
+- **Saving:** both textures are serialised into the map (`FormatTags.TerrainUserSplatmap`).
+- **This importer** calls the same `ApplyBrush` per brush stamp.
+
+**Materials:** the five brushes of the editor's Materials row. Each paints one of the four extra texture slots of the map's **terrain render settings**. What a slot looks like is the texture in that slot; the names are the vanilla defaults. Any of the names in a row works as `material`.
+
+| prefab name | slot | editor name (en-US) | aliases |
+|---|---|---|---|
+| `Terrain Material Extra 1` | Extra1 | Texture Paint Tool 01, "Material Dry" | `Dry`, `Material Dry`, `Texture Paint Tool 01`, `Extra1` |
+| `Terrain Material Extra 2` | Extra2 | Texture Paint Tool 02, "Material Lush" | `Lush`, … `Extra2` |
+| `Terrain Material Extra 3` | Extra3 | Texture Paint Tool 03, "Material Dirt" | `Dirt`, … `Extra3` |
+| `Terrain Material Extra 4` | Extra4 | Texture Paint Tool 04, "Material Sand" | `Sand`, … `Extra4` |
+| `Terrain Material Clear` | None | (erase) | `Clear`, `Erase`. Clears every painted channel under the stamp. |
+
+**There is no rock material.** The terrain shader puts rock on steep slopes and grass by height on its own (`_SplatRockLimit`, `_SplatGrassLimit` in `TerrainMaterialSystem`), so CS1 "rock on slopes ≥ 40°" needs no painting. Suggested mapping: CS1 painted sand → `Sand`, dry-grass plains → `Dry`, bare earth → `Dirt`, lush grass → `Lush`.
+
+`GET /map/terrain-materials` lists:
+- the material tools with slot, aliases and current slot texture;
+- the brush shapes (`BrushPrefab` name, priority, texture);
+- the splatmap sizes.
+
+Coverage is not read back, because the splatmap is a GPU texture.
+
+**Body:**
+
+```json
+{ "name": "cs1-sand",
+  "options": { "dryRun": false, "brush": null, "strength": 1.0, "softEdge": 0, "minStamp": 4, "maxStamps": 250000 },
+  "polygons": [ { "id": "sand1", "material": "Sand", "polygon": [[x,z],[x,z],[x,z]], "strength": 1.0, "softEdge": 6 } ],
+  "strokes":  [ { "id": "dirt7", "material": "Dirt", "x": 120.5, "z": -340.0, "radius": 12, "strength": 0.6 } ] }
+```
+
+**Polygon rules:** polygons follow the surfaces rules. A closing point is optional, they must be inside ±7168 m, and they may not have holes.
+
+**Options:**
+
+| Option | Default | Meaning |
+|---|---|---|
+| `brush` | the brush with the lowest priority, which is the tools' default | Brush shape |
+| `strength` | 1.0 | Brush opacity per stamp, 0–1. Per-item `strength` overrides it. |
+| `softEdge` | 0 | Metres. Edge stamps get at least this radius, so the paint spills about that far past the outline. Per-polygon `softEdge` overrides it. |
+| `minStamp` | 4 | Smallest stamp cell in metres. |
+| `maxStamps` | 250000 | Safety cap on the number of stamps. |
+
+**How a polygon is filled:** an adaptive cover. Cells of 256 m are stamped whole (radius 0.75 × side) when well inside, skipped when well outside, and halved down to `minStamp` along the outline. The dry run reports the stamp count per item.
+
+**Response:** `importId`, `stamps`, and `netGuard`. Painting never touches nets, and `segmentsRemoved` must be 0.
+
+**Undo:** `POST /import/terrain-paint/undo[?name=|?id=]` restores GPU copies of both splatmaps taken before the import. Only the newest import can be undone, the last 3 are kept, and only in memory.
+
+**Unverified in game:**
+- how the paint kernel blends repeated stamps (strength 1 is expected to saturate);
+- whether a large stamp's soft brush texture leaves visible rings. Use a hard brush if so.
