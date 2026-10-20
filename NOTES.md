@@ -400,3 +400,19 @@ The bridge cannot repair a saved `.cok`, and nothing about how it sets the clima
    - **S5:** map settings (climate, theme).
 
    Every stage before its save can be undone, so a hanging stage costs one reload and the previous save survives.
+
+### Round 20c: resolved, the leading space was the cause (my ranking was wrong)
+
+The owner made a copy of the save with the leading space removed from the file name and from the 15 internal occurrences of the map name: a same-length byte replace, with no `.cid`. It loads normally as `dakota-A4b-2048`. So the name caused the hang, not the content.
+
+I had ruled the name out because the loader resolved `%20dakota-A4-2048.cok`, found the metadata and read the format tags. Evidently something later in the load path breaks on the encoded or leading-space name, while the early steps tolerate it. The sunk rocks, power attachments and Arc bridge edges need no action.
+
+**Rules:**
+- Never start a map or save name with a space, and avoid spaces in map names altogether.
+- When a load spins silently after the format tags, try a renamed copy before any content bisect.
+
+**Hierarchy-panel error:** this is not the Cliffs and Rocks pack, as round 19 says.
+- **Duplicate prefab IDs:** they only log a warning in `PrefabSystem.AddPrefab`; the duplicate still gets its own index and shifts nothing.
+- **Empty map:** with the pack loaded and an empty map, no errors occur.
+- **Cause:** the error starts during large imports (a race in the Workspace panel's cache, stuck afterwards).
+- **Fix:** a restart or `POST /diagnostics/hierarchy`.
