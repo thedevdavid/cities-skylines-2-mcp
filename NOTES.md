@@ -350,3 +350,28 @@ Do not change the playset while the editor is open.
 - **Without a restart:** `POST /diagnostics/hierarchy` (no `removeInvalid`) clears the panel's caches and marks it dirty, so it rebuilds. Available since 0.9.18.
 - **0.9.19 diagnostic:** `GET /diagnostics/hierarchy` also reports `panelCache {entries, invalidEntries, stuck}` straight from the cache. So a stuck panel (invalid cache entries, all objects valid) is told apart from real broken objects (`invalidGroups`, removable with `removeInvalid=true`).
 - **Runner:** `tools/import-run.mjs` should end with `POST /diagnostics/hierarchy`. It is harmless when nothing is stuck. Call it only once the imports are done, so the panel's job is idle.
+
+## Round 20: " dakota-A4-2048" hangs on load (diagnosis from logs and process sampling, no code change)
+
+**Observed 2026-10-20:**
+- `SceneFlow.log` shows `Starting game from ' dakota-A4-2048 (… %20dakota-A4-2048.cok@%20dakota-A4-2048.MapMetadata)'` at 04:35:47, then the version and format tags at 04:35:49, then nothing.
+- Sampling the `Cities2` process every 20 s from 04:36:33 to 04:38:15: CPU time grew by exactly 20 s per 20 s, so **one core was pinned**. Memory stayed flat at about 6.99 GB and the window was "not responding".
+- That pattern is a single-threaded loop on the main thread during deserialisation or post-load, not slow I/O or a slow load: a slow load would grow memory and log progress. The game was closed at about 04:38.
+- The earlier attempt (04:23) looked the same.
+
+**Ruled out or unlikely:**
+- **The leading space:** the asset database resolved the URL-encoded path, found the MapMetadata and read the file header and format tags. A renamed copy (`dakota-A4b-2048.cok`, already made) is unlikely to behave differently. It is cheap to try once, but not a priority.
+- **Climate set through `/map/settings`:** `ClimatePanelSystem.currentClimate`'s setter does exactly what the bridge does (`ClimateSystem.currentClimate = prefabEntity`), plus a UI refresh. `ClimateSystem.currentClimate`'s own setter runs `EnsureSeasonsOrder` and the season/weather update either way. `EnsureSeasonsOrder` is a plain LINQ sort with no loop that can spin.
+- **The "References were null when checking if prefab ContinentalGreatHighlandsClimate was previously saved" warnings at save:** these come from `PrefabSystem.WasPreviouslySaved`. They only mean the map had no earlier embedded copies (first save with that climate); the climate, water render settings and terrain render settings are still embedded (`SaveClimate` and friends). They are benign.
+- **The bridge:** at load it only resets a frame counter (`BridgeSystem.OnGameLoadingComplete`). Its tool systems are idle and the undo records are in memory only, not in the file.
+
+**Most likely:** a mod's load or deserialisation hook looping over content that only A4 has.
+- **What is new in A4:** the first full save with about 500 k trees, 727 surfaces, 62 water sources, the TM:PE/Traffic data if the run imported it, and the climate change. A4 is the first map with all of these together.
+- **Mods that run code at load:** Traffic (TM:PE lane connections), Water Features, Lumina, Anarchy, Image Overlay, I18NEverywhere and the PDX packs.
+
+**To isolate (owner):**
+1. Load `dakota-A3-2048` (50 MB, saved 10:04 on 2026-10-19). If it loads, the hang is specific to A4's content or settings.
+2. Load A4 with a **minimal playset**: CS2MCP plus the asset packs only, with Traffic, Water Features and Lumina disabled. If it loads, re-enable mods one at a time; Traffic and Water Features first, since both act on load and A4 is the first map with TM:PE data and 62 bridge-made sources.
+3. If it still hangs with the minimal playset, the cause is in vanilla content: object count, or the embedded climate/render-settings prefabs. Then re-run the import into a fresh map, save after networks, objects and trees separately, and test-load each save to bisect.
+
+The bridge cannot repair a saved `.cok`, and nothing about how it sets the climate needs to change.
