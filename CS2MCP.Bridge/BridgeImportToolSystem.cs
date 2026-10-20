@@ -1958,6 +1958,13 @@ namespace CS2MCP
                         t = Math.Round(node.SnapT, 3),
                         joinedAtEnd = node.SnapT < 0.02f || node.SnapT > 0.98f,
                         node = node.Entity != Entity.Null ? $"{node.Entity.Index}:{node.Entity.Version}" : null,
+                        // 0.9.31: where the junction node actually ended up (the game can move or merge it after the split).
+                        driftAfterBuild = node.Entity != Entity.Null && EntityManager.Exists(node.Entity) && EntityManager.HasComponent<Node>(node.Entity)
+                            ? Math.Round(math.distance(EntityManager.GetComponentData<Node>(node.Entity).m_Position.xz, node.OriginalXZ), 2)
+                            : (double?)null,
+                        nodeDegree = node.Entity != Entity.Null && EntityManager.Exists(node.Entity) && EntityManager.HasBuffer<ConnectedEdge>(node.Entity)
+                            ? EntityManager.GetBuffer<ConnectedEdge>(node.Entity, true).Length
+                            : (int?)null,
                     };
                 }
                 else if (node.SnapTried)

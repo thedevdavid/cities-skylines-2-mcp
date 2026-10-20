@@ -52,6 +52,18 @@
       <HintPath>$(ManagedDLLPath)\Colossal.IO.AssetDatabase.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Colossal.AssetPipeline">
+      <HintPath>$(ManagedDLLPath)\Colossal.AssetPipeline.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.AssetPipeline.Native">
+      <HintPath>$(ManagedDLLPath)\Colossal.AssetPipeline.Native.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.IO">
+      <HintPath>$(ManagedDLLPath)\Colossal.IO.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Colossal.Collections">
       <HintPath>$(ManagedDLLPath)\Colossal.Collections.dll</HintPath>
       <Private>false</Private>

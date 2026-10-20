@@ -716,3 +716,16 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Probe:** `POST /debug/terrain-paint/probe` measures how stamps combine and how materials are encoded, for the next run.
 
 **`GET/POST /graph/diff`:** import set against the live graph, giving missing and extra segments per 500 m cell.
+
+## Round 31 (0.9.31, offline)
+
+**Terrain textures:** code **can** do what the image picker does. `POST /map/terrain-textures` imports an image as a `TextureAsset` into the user asset database and assigns it to an editable copy of the terrain render settings (MAP_SETTINGS.md). The bridge now references `Colossal.AssetPipeline(.Native)` and `Colossal.IO`. Not yet run in game.
+
+**`/map/time`:** the editor's time-of-day, date and cloudiness preview, for dated season screenshots.
+
+**Snap drift (A-v7 gravel gaps `gap_e25579_0`, `gap_e36563_0`):** the T ends landed 56 m and 64 m from the requested points, while their other ends sit exactly at the requested points.
+- **The through road's segments are now 64/128/160 m,** multiples of 32 m: Gravel Road is a `SnapCellSize` prefab.
+- **Only `NodeReductionSystem` moves nodes like that,** to balance lengths: it joins or moves **degree-2** Temp nodes that have an original (`CanMove`). So the split node was degree 2 at some moment, before the gap edge connected or when a later course re-touched the road.
+- **Not the cause:** `CourseSplitSystem.SnapCoursePositions` shifts at most 2 m (4 m snap).
+- **Evidence for A-v8:** the import report's `snapToSegment.details[]` gains `driftAfterBuild` (metres from the requested point to the live junction node) and `nodeDegree`.
+- **Test on A-v8:** a snapped T on a long straight gravel road, alone in one import. If the drift appears there, the split node is being reduced in the same tool cycle, and the fix is to pin it (a `Fixed`/elevated-like `ForbidMove`, or adding the edge in the split's own definition). If not, a later import moves it, and that import is the place to fix.

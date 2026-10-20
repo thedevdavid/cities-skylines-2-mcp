@@ -179,3 +179,38 @@ POST /map/settings
 ```
 
 The prefab names here are examples; list the real ones with `/prefabs?category=…`. **Unverified in game:** that a clone made through the bridge is saved into the map exactly like an editor clone. The code path is the same (`Clone` + `AddPrefab` + current), so it is expected to be.
+
+## Terrain textures (`GET` / `POST /map/terrain-textures`, 0.9.31)
+
+This does what the Environment panel's image picker does (`Game.UI.Editor.DualImagePickerPopupField.OnSelectFile`):
+1. `DefaultTextureImporter.Import`, with the slot's `[TextureImport]` settings (albedo, or mask map for the normals, wrap Repeat, BC compression);
+2. `AssetDatabase.user.AddAsset(AssetImportPipeline.GetPath(…, DataType.RawTexture, user), texture)` and `Save()`;
+3. the new `TextureAsset` guid written into the slot's `AssetReference<TextureAsset>` on the current terrain render settings. A read-only prefab is cloned first, as with the panel's "Edit terrain rendering settings" button.
+4. `TerrainMaterialSystem.ApplyRenderSettings()`.
+
+The texture lives in the user asset database. The map references it the same way a hand-picked texture is referenced.
+
+```json
+POST /map/terrain-textures
+{ "textures": [ { "slot": "Grass", "diffuse": "D:/.../grass.png" },
+                { "slot": "Rock", "diffuse": "D:/.../rock.png", "normal": "D:/.../rock_n.png" },
+                { "slot": "Extra1", "diffuse": "...", "normal": "..." } ] }
+```
+
+- **Slots:** `Rock`, `Dirt`, `Grass`, `Extra1`–`Extra4`. Each has `diffuse` and `normal`, and either may be omitted.
+- **Formats:** the importer's (`ImageAsset.kExtensions`, png/jpg/tga…).
+- **GET** lists the current asset reference of every slot.
+- **Settings and tiling:** legacy texture format, tiling and the ExtraN numbers stay in `/map/settings terrainEdit`.
+- **Unverified in game:** that the imported asset is packed with the saved map like a picker import. The same code path suggests it is.
+
+## Time-of-day and date preview (`GET` / `POST /map/time`, 0.9.31)
+
+This is the editor bottom bar (`EditorBottomBarUISystem`): `PlanetarySystem.overrideTime` + `normalizedTime`, `ClimateSystem.currentDate` override (0–1 through the year), and `cloudiness` override.
+
+```json
+POST /map/time { "month": 1, "day": 15, "hour": 13.5, "cloudiness": 0.2 }
+POST /map/time { "date": 0.54 }
+POST /map/time { "reset": true }
+```
+
+It is a preview only and is not saved with the map. The season look follows the date through the climate's seasons.
