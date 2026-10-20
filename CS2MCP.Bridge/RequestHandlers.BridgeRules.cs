@@ -50,6 +50,7 @@ namespace CS2MCP
                 }
             }
 
+            report.AddRange(CheckCourseOwnerEdges(job, mode, problems, ref heightData));
             foreach (BridgeImportToolSystem.ImportEdge edge in job.Edges)
             {
                 if (!EntityManager.HasComponent<BridgeData>(edge.Prefab) || !EntityManager.HasComponent<NetGeometryData>(edge.Prefab))
@@ -246,6 +247,123 @@ namespace CS2MCP
                 along += span;
             }
             return new { repeats, sequenceMin = total.x, sequenceMax = total.y, spans };
+        }
+
+        /// <summary>
+        /// Dams and other course-owner nets (GeometryFlags.SubOwner): rules dam.single,
+        /// dam.level, dam.elevation (warning), dam.flow (warning). Reports the spawned
+        /// course objects and the flow orientation the import will use.
+        /// </summary>
+        private List<object> CheckCourseOwnerEdges(BridgeImportToolSystem.ImportJob job, string mode, List<string> problems, ref TerrainHeightData heightData)
+        {
+            var report = new List<object>();
+            var use = new Dictionary<int, int>();
+            var owners = new List<BridgeImportToolSystem.ImportEdge>();
+            foreach (BridgeImportToolSystem.ImportEdge edge in job.Edges)
+            {
+                if (EntityManager.HasComponent<NetGeometryData>(edge.Prefab)
+                    && (EntityManager.GetComponentData<NetGeometryData>(edge.Prefab).m_Flags & GeometryFlags.SubOwner) != 0)
+                {
+                    owners.Add(edge);
+                    use[edge.A] = use.TryGetValue(edge.A, out int ca) ? ca + 1 : 1;
+                    use[edge.B] = use.TryGetValue(edge.B, out int cb) ? cb + 1 : 1;
+                }
+            }
+            if (owners.Count == 0 || mode == "off")
+            {
+                return report;
+            }
+            BridgeImportToolSystem tool = World.GetOrCreateSystemManaged<BridgeImportToolSystem>();
+            PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            foreach (BridgeImportToolSystem.ImportEdge edge in owners)
+            {
+                var errors = new List<string>();
+                var warnings = new List<string>();
+                if (use[edge.A] > 1 || use[edge.B] > 1)
+                {
+                    errors.Add("dam.single: each edge of this prefab spawns its own plant (MakeOwner course object); send the whole dam as ONE edge abutment to abutment, sharing no node with another edge of the prefab");
+                }
+                float yA = NodeDeckY(job.Nodes[edge.A], ref heightData);
+                float yB = NodeDeckY(job.Nodes[edge.B], ref heightData);
+                NetGeometryData geometry = EntityManager.GetComponentData<NetGeometryData>(edge.Prefab);
+                if (geometry.m_MaxSlopeSteepness == 0f && math.abs(yA - yB) > 0.5f)
+                {
+                    errors.Add($"dam.level: the prefab has max slope 0 (the net tool levels the crest to the start height); the ends are at {yA:F1} and {yB:F1} m. Give both nodes the same absolute y (the crest)");
+                }
+                float2 elevationRange = default;
+                Game.Net.PlacementFlags placement = default;
+                if (EntityManager.HasComponent<PlaceableNetData>(edge.Prefab))
+                {
+                    PlaceableNetData placeable = EntityManager.GetComponentData<PlaceableNetData>(edge.Prefab);
+                    elevationRange = new float2(placeable.m_ElevationRange.min, placeable.m_ElevationRange.max);
+                    placement = placeable.m_PlacementFlags;
+                }
+                float2 a = job.Nodes[edge.A].XZ;
+                float2 b = job.Nodes[edge.B].XZ;
+                float eA = yA - TerrainUtils.SampleHeight(ref heightData, new float3(a.x, 0f, a.y));
+                float eB = yB - TerrainUtils.SampleHeight(ref heightData, new float3(b.x, 0f, b.y));
+                if (eA < elevationRange.x - 1f || eA > elevationRange.y + 1f || eB < elevationRange.x - 1f || eB > elevationRange.y + 1f)
+                {
+                    warnings.Add($"dam.elevation: the abutments should sit on the terrain (prefab elevation range {elevationRange.x:F0}..{elevationRange.y:F0} m); they are {eA:F1} and {eB:F1} m above it. Put the end nodes where the valley sides reach the crest height");
+                }
+                float weight = 0f;
+                if ((placement & (Game.Net.PlacementFlags.FlowLeft | Game.Net.PlacementFlags.FlowRight)) != 0)
+                {
+                    Bezier4x3 curve = NetUtils.StraightCurve(new float3(a.x, yA, a.y), new float3(b.x, yB, b.y));
+                    weight = tool.FlowWeight(curve, placement);
+                    if (math.abs(weight) < 0.01f)
+                    {
+                        warnings.Add("dam.flow: no water flows across the line, so the side cannot be chosen from the flow (the edge is built a -> b unless flow is 'invert'); the plant only produces power with water flowing through the dam");
+                    }
+                }
+                var spawn = new List<string>();
+                if (EntityManager.HasBuffer<Game.Prefabs.SubObject>(edge.Prefab))
+                {
+                    foreach (Game.Prefabs.SubObject sub in EntityManager.GetBuffer<Game.Prefabs.SubObject>(edge.Prefab, true))
+                    {
+                        if ((sub.m_Flags & Game.Prefabs.SubObjectFlags.CoursePlacement) != 0)
+                        {
+                            string name = prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabData>(sub.m_Prefab), out PrefabBase p) ? p.name : "?";
+                            string at = (sub.m_Flags & Game.Prefabs.SubObjectFlags.StartPlacement) != 0 ? "start" : "end";
+                            string own = (sub.m_Flags & Game.Prefabs.SubObjectFlags.MakeOwner) != 0 ? " (owner of the dam edges)" : "";
+                            spawn.Add($"{name} at the course {at}{own}, local offset ({sub.m_Position.x:F1}, {sub.m_Position.y:F1}, {sub.m_Position.z:F1})");
+                        }
+                    }
+                }
+                string flowMode = (edge.Flow ?? "auto").ToLowerInvariant();
+                bool invert = flowMode == "invert" || (flowMode == "auto" && weight < 0f);
+                foreach (string e in errors)
+                {
+                    string message = $"edge '{edge.Id}' ({edge.PrefabName}): {e}";
+                    if (mode == "error")
+                    {
+                        problems.Add(message);
+                    }
+                    else
+                    {
+                        job.Warnings.Add(message);
+                    }
+                }
+                foreach (string w in warnings)
+                {
+                    job.Warnings.Add($"edge '{edge.Id}' ({edge.PrefabName}): {w}");
+                }
+                report.Add(new
+                {
+                    edge = edge.Id,
+                    prefab = edge.PrefabName,
+                    kind = "courseOwner",
+                    crest = new[] { yA, yB },
+                    elevation = new[] { eA, eB },
+                    placement = placement.ToString(),
+                    flowWeight = weight,
+                    courseStartsAt = invert ? job.Nodes[edge.B].Id : job.Nodes[edge.A].Id,
+                    spawns = spawn,
+                    errors,
+                    warnings,
+                });
+            }
+            return report;
         }
 
         private float NodeDeckY(BridgeImportToolSystem.ImportNode node, ref TerrainHeightData heightData)

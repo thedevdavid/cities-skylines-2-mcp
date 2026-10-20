@@ -1719,6 +1719,10 @@ server.registerTool(
               .describe("Force quay/retaining walls: Side.Raised upgrade on that side (left/right seen from a to b)"),
             noPillars: z.boolean().optional().describe("Delete the generic pillars of this edge's segments after the import (they return if the segment is updated later)"),
             fixedIndex: z.number().int().optional().describe("Ignored: send ONE edge per fixed-span bridge; the game numbers the spans"),
+            flow: z
+              .enum(["auto", "asIs", "invert"])
+              .optional()
+              .describe("Water-flow nets (dams): auto (default) orients the course from the water velocity like the net tool; asIs keeps a->b; invert flips it"),
           }),
         )
         .optional(),

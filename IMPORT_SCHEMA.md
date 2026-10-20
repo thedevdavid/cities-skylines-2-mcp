@@ -61,6 +61,7 @@ A node has exactly one height. All edges meeting at a node use it, so conflictin
 | `attachTo` | Optional `{a?: {radius, prefabContains?}, b?: {...}}`: `snapToSegment` for that end's node, unless the node has its own. |
 | `wall` | Optional `left`, `right`, `both` or `none`. Forces a wall on that side whatever the elevation (quays). Left and right are seen travelling from `a` to `b`. The edge definition carries `Game.Net.Upgraded` with `CompositionFlags.Side.Raised` on that side. `GenerateEdgesSystem` copies it onto the new edge, and `CompositionSelectSystem` ORs upgrade flags into the composition, the same mechanism as road upgrades and the mods that add retaining walls. It only shows a wall where the net has a composition for raised sides (quays do; other roads only with such an asset). |
 | `noPillars` | Optional `true` (0.9.22). When the import ends, deletes the generic `Game.Objects.Pillar` sub-objects of the edge's segments, and of the nodes that join only those segments. They come back whenever the game updates such a segment, for example when a later edge connects at its node, so set it on the last import that touches the bridge, or re-run `POST /net/pillars/remove`. Bridge-prefab towers and anchors are not `Pillar` objects and stay. **Unverified in game.** |
+| `flow` | Water-flow nets only (dams; prefab placement `FlowLeft`/`FlowRight`). `auto` (default) does what the net tool does: it samples the water velocity along the course and flips the course when the flow crosses it the wrong way. `asIs` keeps a → b; `invert` flips. The flip decides which end the dam's course objects (the power plant) go to. |
 | `fixedIndex` | Accepted and ignored, with a warning. The game assigns fixed span indices itself (see "Bridge prefabs"). |
 
 End-to-end length must be 4–1500 m. The game may split an edge into several segments where it crosses other networks; all of them are reported.
@@ -77,6 +78,39 @@ End-to-end length must be 4–1500 m. The game may split an edge into several se
 | `bypassValidation` | false | Sets `ToolSystem.ignoreErrors` (the game's own ignore-errors switch, which `GetAllowApply` honours) for the duration of the import and restores the previous value afterwards, also when the import is interrupted. Imports then no longer depend on Anarchy's toggle or the open tool. The report's `validation` block records it. |
 | `report` | `"summary"` | `"full"` adds every per-edge result to the response. Large imports should keep the summary and page with `GET /import/report`. |
 | `bridgeRules` | `"error"` | Checks on edges whose prefab is a bridge (see "Bridge prefabs"). `"error"` rejects the import (400) and lists the broken rules in `problems`. `"warn"` reports them in `warnings` and builds anyway. `"off"` skips the checks. The dry run and the 400 answer carry a per-edge `bridges` block either way. |
+
+### Dams and other course-owner nets (0.9.23)
+
+Decompiled from `NetToolSystem.CreateDefinitionsJob` (`GetOwnerDefinition`, `CreateCourseObject`, `CreateSubNets`, `CalculatedInverseWeight`, `InvertCourse`), `NetInitializeSystem` and `WaterPoweredInitializeSystem`.
+
+**How the game builds a hydro dam.** There is no dam component and no special tool. The dam net prefab (`Hydroelectric_Power_Plant_01 Dam`, a `RoadPrefab`) lists sub-objects with `NetObjectPlacement.CourseStart` / `CourseEnd`. `NetInitializeSystem` turns them into `SubObjectFlags.CoursePlacement` (+ `StartPlacement`/`EndPlacement`), marks the first one `MakeOwner` and the net `GeometryFlags.SubOwner`. When the net tool draws one course of that prefab:
+1. **Orientation:** the tool samples the water velocity along the course. It flips the course if the flow does not cross it in the direction the prefab wants (`PlacementFlags.FlowRight` = water crossing from the left of start→end to its right, `FlowLeft` the opposite).
+2. **Plant:** the `MakeOwner` object, the power plant `HydroelectricPowerPlant01`, is created at the course start or end. Its transform is the course position's rotation (`NetUtils.GetNodeRotation(tangent)`) applied to the sub-object's local offset. It comes with its own prefab sub-nets.
+3. **Ownership:** the course gets an `OwnerDefinition` pointing at that plant, so every edge the course becomes (`CourseSplitSystem` keeps the owner on each split) is a **sub-net of the plant**. Other course objects, probably `HydroelectricPowerPlant01_End` at the other end, are created owned by the plant.
+4. **Power:** `WaterPoweredInitializeSystem` then sums the plant's sub-net edges that carry `FlowLeft`/`FlowRight`. Their length, their height over the terrain and the water flow through them give the production estimate.
+
+A plain course without step 3, which is what the importer did before 0.9.23, gives an ownerless dam deck and no plant. The plant placed as an object has no dam, because the dam is not one of its prefab sub-nets.
+
+**0.9.23 does the same in `/import/network`.** Every edge whose prefab has `CoursePlacement` sub-objects:
+- is oriented for the flow (`flow`);
+- spawns the course objects, with the owner's sub-nets;
+- is built as the owner's sub-net, with `LocalCurveCache` in the editor as the tool adds.
+
+Nodes of such edges are never created first as standalone nodes; they are made with the edge, so they belong to the plant.
+
+**Contract for the converter (the dam):**
+- **One edge per dam:** `{ "id": "dam", "a": "damW", "b": "damE", "prefab": "Hydroelectric_Power_Plant_01 Dam" }` from abutment to abutment, with no `control` (the dam is straight). Never split it: each edge would spawn its own plant (rule `dam.single`).
+- **A level crest:** the prefab has max slope 0, and the net tool levels the crest to the start height. Give both nodes the same absolute `y` = the crest (`heightMode: absolute`), rule `dam.level`.
+- **Abutments on the ground:** the prefab's elevation range is 0–0 (round 13), so the tool keeps the ends at ground level. Put the end nodes where the valley sides reach the crest height, so that the end elevations are about 0 (warning `dam.elevation` when an end is more than 1 m above or below the terrain). The span between them stands over the valley.
+- **Flow:** keep `flow: "auto"` once water flows in the river. If no water flows yet (warning `dam.flow`), pass `asIs`/`invert` so the plant lands on the intended side.
+  - With `FlowRight`, going a → b the water must cross from left to right. `MathUtils.Right(t) = (t.z, −t.x)`, so for a → b heading +x the "right" side is −z.
+  - Which flag this prefab carries, and whether the plant is the start or end object, shows in the dry run's `bridges[].placement` / `spawns`. It cannot be read offline.
+- **Other options:** `nodesFirst` and `bypassValidation` as usual; a building lot on a slope may need `bypassValidation`.
+- **Dakota Falls site (x1 frame):** abutments (1440, 4673) and (1576, 4694), crest y ≈ 172. The river flows north → south. Assuming +z is north, the flow is −z: a = west (1440, 4673) → b = east gives right = −z = downstream, so `FlowRight` keeps a → b and `FlowLeft` flips it. With `auto` and water present this is decided in game.
+  - **Terrain check:** the round-13 terrain was 162–166 m at x 1550, so the east abutment needs the terrain to reach ≈ 172 there, or the end will be ~6–10 m elevated. Check the dry run's `elevation`, and if needed move the abutments outward along the axis to where the slopes reach the crest.
+- **Undo:** `/import/network/undo` deletes the dam edges. The plant and the end object are not in the undo record yet, so delete them with `/build/demolish` if needed.
+
+**Why the A-v4 deck looked like a footbridge:** it was imported as an ownerless plain course with per-end elevations of 8–25 m. With elevated ends, the composition is the elevated deck variant with railings rather than the ground-level dam wall the tool builds from 0-elevation abutments. On top of that, a `Pavement Path` ran along the same line. **The dam net is a bridge prefab.** `FlowLeft`/`FlowRight` are set only from `Bridge.m_WaterFlow` (`NetInitializeSystem`, the only writer), and `WaterPowered` counts only sub-net edges with those flags. So `Hydroelectric_Power_Plant_01 Dam` carries a `Game.Prefabs.Bridge` component: `RequireElevated`, straight edges, symmetrical, smooth slopes, edge length 0.6–1.4 × its segmentLength. Its deck with railings is the bridge deck. The bridge pre-checks of 0.9.22 apply to it as well. `/prefabs/info` shows `bridge.waterFlow`, `buildStyle` and `segmentLength` in game.
 
 ### Bridge prefabs (0.9.22)
 

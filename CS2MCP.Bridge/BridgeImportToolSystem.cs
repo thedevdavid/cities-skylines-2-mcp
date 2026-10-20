@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Colossal.Mathematics;
+using Game;
 using Game.Common;
 using Game.Net;
 using Game.Prefabs;
@@ -56,6 +57,8 @@ namespace CS2MCP
             /// <summary>snapToSegment: attach to the nearest existing segment within this radius (0 = off).</summary>
             public float SnapRadius;
             public string SnapPrefabContains;
+            /// <summary>Used by a course-owner net (dam): never created as a standalone node.</summary>
+            public bool NoStandalone;
             public float2 OriginalXZ;
             public bool SnapTried;
             public Entity SnapSegment;
@@ -76,6 +79,12 @@ namespace CS2MCP
             public CompositionFlags Upgrades;
             /// <summary>Delete the generic Game.Objects.Pillar sub-objects of the built segments at the end of the import.</summary>
             public bool NoPillars;
+            /// <summary>Water-flow nets (dams): "auto" (default, as the net tool), "asIs" or "invert".</summary>
+            public string Flow;
+            public float FlowWeight;
+            public bool Inverted;
+            /// <summary>Course objects the prefab spawned (the dam's power plant and ends).</summary>
+            public List<string> CourseObjects = new List<string>();
             public string Status = "pending";
             public string Error;
             public List<Entity> Segments = new List<Entity>();
@@ -308,7 +317,8 @@ namespace CS2MCP
                 for (int i = 0; i < job.Nodes.Count; i++)
                 {
                     // Nodes that snap to a segment are placed by the split, not as standalone nodes.
-                    if (job.Nodes[i].Entity == Entity.Null && job.Nodes[i].CreatePrefab != Entity.Null && job.Nodes[i].SnapRadius <= 0f)
+                    if (job.Nodes[i].Entity == Entity.Null && job.Nodes[i].CreatePrefab != Entity.Null && job.Nodes[i].SnapRadius <= 0f
+                        && !job.Nodes[i].NoStandalone)
                     {
                         pending.Add(i);
                     }
@@ -1125,6 +1135,9 @@ namespace CS2MCP
                 course.m_EndPosition.m_Flags |= CoursePosFlags.FreeHeight;
             }
 
+            OrientForFlow(edge, ref course);
+            bool owned = DefineCourseObjects(edge, course, commandBuffer, out OwnerDefinition owner);
+
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
             Entity entity = commandBuffer.CreateEntity();
             commandBuffer.AddComponent(entity, new CreationDefinition
@@ -1134,6 +1147,22 @@ namespace CS2MCP
                 m_Flags = CreationFlags.SubElevation,
             });
             commandBuffer.AddComponent(entity, default(Updated));
+            if (owned)
+            {
+                commandBuffer.AddComponent(entity, owner);
+                if (m_ToolSystem.actionMode.IsEditor())
+                {
+                    Game.Objects.Transform inverse = Game.Objects.ObjectUtils.InverseTransform(new Game.Objects.Transform(owner.m_Position, owner.m_Rotation));
+                    commandBuffer.AddComponent(entity, new LocalCurveCache
+                    {
+                        m_Curve = new Bezier4x3(
+                            Game.Objects.ObjectUtils.WorldToLocal(inverse, course.m_Curve.a),
+                            Game.Objects.ObjectUtils.WorldToLocal(inverse, course.m_Curve.b),
+                            Game.Objects.ObjectUtils.WorldToLocal(inverse, course.m_Curve.c),
+                            Game.Objects.ObjectUtils.WorldToLocal(inverse, course.m_Curve.d)),
+                    });
+                }
+            }
             commandBuffer.AddComponent(entity, course);
             if (edge.Upgrades != default(CompositionFlags))
             {

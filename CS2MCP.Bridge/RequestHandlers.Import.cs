@@ -70,6 +70,8 @@ namespace CS2MCP
             public int? fixedIndex;
             /// <summary>Delete the generic pillars of this edge's segments after the import.</summary>
             public bool? noPillars;
+            /// <summary>Water-flow nets (dams): auto (default), asIs, invert.</summary>
+            public string flow;
         }
 
         public sealed class ImportOptionsDto
@@ -337,9 +339,13 @@ namespace CS2MCP
                 }
 
                 // Standalone nodes take the prefab of the first edge that uses them.
+                bool courseOwner = EntityManager.HasComponent<NetGeometryData>(prefabEntity)
+                    && (EntityManager.GetComponentData<NetGeometryData>(prefabEntity).m_Flags & Game.Net.GeometryFlags.SubOwner) != 0;
                 foreach (int end in new[] { a, b })
                 {
                     BridgeImportToolSystem.ImportNode node = job.Nodes[end];
+                    // A dam's nodes belong to the plant it spawns: build them with the edge, not first.
+                    node.NoStandalone |= courseOwner;
                     if (node.CreatePrefab == Entity.Null)
                     {
                         node.CreatePrefab = prefabEntity;
@@ -379,6 +385,7 @@ namespace CS2MCP
                     Control = control,
                     Upgrades = upgrades,
                     NoPillars = dto.noPillars == true,
+                    Flow = dto.flow,
                 });
                 if (dto.fixedIndex.HasValue && job.Warnings.Count < 1000)
                 {
