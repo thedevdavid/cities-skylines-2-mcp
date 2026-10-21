@@ -215,3 +215,25 @@ Read with `GET /prefabs/info?name=<prefab>` (bridge 0.9.19, `geometry.boundsMin`
 | `Boulder06` | vanilla | 4.85 × 2.53 × 4.66 | -1.65 | 2.53 | -2.18..2.43 | -2.33..2.21 |
 | `Boulder07` | vanilla | 5.32 × 1.82 × 4.27 | -1.36 | 1.82 | -2.49..2.66 | -2.14..2.06 |
 | `Boulder08` | vanilla | 5.53 × 1.76 × 5.26 | -1.83 | 1.76 | -2.65..2.77 | -2.37..2.63 |
+
+## Vanilla pillar objects (from Locale.cok, 0.9.42)
+
+- **Placeholders:** the net deck spawns one of these, and the game picks a variant: `Pillar Placeholder` (roads), `Train Pillar Placeholder`, `Subway Pillar Placeholder`, `Pillar Pedestrian Placeholder`.
+- **Variants:**
+  - **Roads:** `Vertical Pillar`, `Horizontal Pillar 6/8/10/12/13/16/19/20/21/22/24/25/27/28/33/38/43` (the number is the deck width the crossbeam spans) and `Pillar Top NN`.
+  - **Other nets:** the same sets with a `Train `, `Subway ` or `Pedestrian ` prefix, plus `Vertical Pillar Pedestrian`.
+- **Bridge towers:**
+  - suspension: `2LaneSuspensionBridgePillar`, `3LaneSuspensionBridgePillar`, `4LaneSuspensionBridgePillar`, `5LaneSuspensionBridgePillar`;
+  - arch and covered: `2LaneTrussArchBridgePillar`, `4LaneTiedArchBridgePillar`, `2LaneWoodenCoveredBridgePillar`;
+  - cable-stayed and extradosed: `6LaneExtradosedBridgePillar`, `8LaneCableStayedBridgePillar`, `PedestrianBridgeCableStayedPillar`;
+  - named bridges: `GoldenGateBridgePillar01`, `GrandBridgePillar01`;
+  - each tower also has a `… Placeholder`.
+- **Other pillars:**
+  - B&P net pieces: `ExtradosedBridge01NetPillar(Base/Top)`, `TrussArchBridge01NetPillar(Base)`;
+  - B&P pier: `Pier01Pillar01/02`, `Pier01PillarBase01/02`, `Pier01PillarSupport01/02`, `Pier01PillarTop1/2`;
+  - subway station: `SubwayStationElevated01Pillar`.
+- **Sizes:** not readable offline. `GET /prefabs/info?name=…` gives size, bounds, and since 0.9.42 the pillar type, the stack data and the placeholder variant count.
+- **Placing them with `/import/objects`:** it accepts any prefab with `ObjectData`, so pillars too.
+  - A standalone pillar has no owner, so `AlignSystem` never stretches it to the ground.
+  - A stack pillar (the vertical ones) gets its range in `GenerateObjectsSystem`. Direction `Up` reaches down by the object's elevation: give `y` = the top, and the bridge passes elevation = y − ground. Other directions keep a fixed default length.
+  - A placeholder picks a random variant, not the best fit.

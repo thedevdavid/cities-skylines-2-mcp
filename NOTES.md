@@ -925,3 +925,13 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
   - `clearOverrides: true` clears them on demand, plus the date override unless the same call sets a date;
   - GET lists the value of every override;
   - `month` + `hour` without `day` sets date = (month − 1 + hour/24)/12, because a CS2 day is one month unit of the climate curves.
+
+## Round 42 (0.9.42): pillar objects
+
+**Rock-shed colonnade question:** the vanilla pillar names are now listed in PREFAB_NAMES.md.
+
+**Can they be placed standalone?** `/import/objects` takes them; there is no flag and no refusal. As standalone objects they are not stretched by `AlignSystem`, which only handles owned objects.
+- **Stack pillars:** they get their range from `GenerateObjectsSystem`. With `StackDirection.Up` they reach down by the object's elevation.
+- **Placeholders:** they pick a random variant.
+
+**`/prefabs/info`:** now reports `geometry.pillar` (type, offsetRange), `geometry.stack` (direction, first/middle/last bounds) and `geometry.placeholder` (variant count).

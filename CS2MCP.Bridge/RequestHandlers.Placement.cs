@@ -53,6 +53,28 @@ namespace CS2MCP
                     size = new { x = data.m_Size.x, y = data.m_Size.y, z = data.m_Size.z },
                     boundsMin = new { x = data.m_Bounds.min.x, y = data.m_Bounds.min.y, z = data.m_Bounds.min.z },
                     boundsMax = new { x = data.m_Bounds.max.x, y = data.m_Bounds.max.y, z = data.m_Bounds.max.z },
+                    // 0.9.42: pillar and stack data. A standalone stack object (no owner, so AlignSystem
+                    // never stretches it) gets its range in GenerateObjectsSystem: direction Up reaches
+                    // down by the object's elevation (firstBounds.min - elevation), otherwise a fixed length.
+                    pillar = EntityManager.HasComponent<PillarData>(prefabEntity)
+                        ? new
+                        {
+                            type = EntityManager.GetComponentData<PillarData>(prefabEntity).m_Type.ToString(),
+                            offsetRange = new[] { EntityManager.GetComponentData<PillarData>(prefabEntity).m_OffsetRange.min, EntityManager.GetComponentData<PillarData>(prefabEntity).m_OffsetRange.max },
+                        }
+                        : null,
+                    stack = EntityManager.HasComponent<StackData>(prefabEntity)
+                        ? new
+                        {
+                            direction = EntityManager.GetComponentData<StackData>(prefabEntity).m_Direction.ToString(),
+                            first = new[] { EntityManager.GetComponentData<StackData>(prefabEntity).m_FirstBounds.min, EntityManager.GetComponentData<StackData>(prefabEntity).m_FirstBounds.max },
+                            middle = new[] { EntityManager.GetComponentData<StackData>(prefabEntity).m_MiddleBounds.min, EntityManager.GetComponentData<StackData>(prefabEntity).m_MiddleBounds.max },
+                            last = new[] { EntityManager.GetComponentData<StackData>(prefabEntity).m_LastBounds.min, EntityManager.GetComponentData<StackData>(prefabEntity).m_LastBounds.max },
+                        }
+                        : null,
+                    placeholder = EntityManager.HasBuffer<PlaceholderObjectElement>(prefabEntity)
+                        ? EntityManager.GetBuffer<PlaceholderObjectElement>(prefabEntity, true).Length
+                        : (int?)null,
                 };
             }
             object placement = null;
