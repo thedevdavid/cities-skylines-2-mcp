@@ -72,6 +72,10 @@ namespace CS2MCP
             public bool? noPillars;
             /// <summary>Water-flow nets (dams): auto (default), asIs, invert.</summary>
             public string flow;
+            /// <summary>0.9.39: force the Elevated (pillars) composition on this edge's segments.</summary>
+            public bool? elevated;
+            /// <summary>Converter tag ("elevated", "bridge", "tunnel", ...); see options.elevatedFromStructure.</summary>
+            public string structure;
         }
 
         public sealed class ImportOptionsDto
@@ -87,6 +91,8 @@ namespace CS2MCP
             public string bridgeRules;
             /// <summary>0.9.33: allow edges of nets another prefab spawns as AuxiliaryNets (refused by default).</summary>
             public bool? allowAuxiliaryNets;
+            /// <summary>0.9.39: treat every edge with structure "elevated" as elevated:true.</summary>
+            public bool? elevatedFromStructure;
         }
 
         public sealed class ImportRequestDto
@@ -413,6 +419,8 @@ namespace CS2MCP
                     Control = control,
                     Upgrades = upgrades,
                     NoPillars = dto.noPillars == true,
+                    ForceElevated = dto.elevated == true
+                        || (options.elevatedFromStructure == true && string.Equals(dto.structure, "elevated", StringComparison.OrdinalIgnoreCase)),
                     Flow = dto.flow,
                 });
                 if (dto.fixedIndex.HasValue && job.Warnings.Count < 1000)

@@ -858,3 +858,33 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **No effect today:** the bridge ignores control y (only x/z are used), so this never reached the game. It should be fixed in the converter anyway.
 
 **Test body:** `net-converter/out/x1/test-heights-ic08.json` (14 edges, CS1 segments 14574, 35648, 17897, 31688).
+
+## Round 39 (0.9.39): pillars vs retaining walls, `elevated: true`
+
+**The owner's "messed up interchange" (A-v8 shots 12/15):** CS1's flyover ramps on pillars appear as walled embankments, even though the heights match within 4 m.
+
+**The rule, from the game code (all roads and highways, including ramps):**
+- **Elevation limit:** `NetInitializeSystem` sets `NetGeometryData.m_ElevationLimit` to 4 m for every road and highway; only pathways get 2 m.
+  - `RaisedIsElevated`, which would put 4 m pieces on pillars, is set only for pathways, airplane paths, power lines and pipelines.
+- **Composition:** `CompositionSelectSystem` → `NetCompositionHelpers.GetElevationFlags(start node, edge, end node)` decides, per side, from max(min elevation at the start, min at the end, middle elevation):
+  - ≥ 8 m (2 × limit) on both sides → `General.Elevated`: a deck on pillars, no walls (`RequireElevated` prefabs always).
+  - ≥ 4 m → `Side.Raised`: retaining walls, the "raised road" pieces.
+  - ≤ −4 m → `Side.Lowered`. Tunnel needs ≤ −8 / −12 m.
+  - Otherwise → the ground composition.
+  - The result is ORed with `Upgraded` flags and fixed-span states.
+- **Pillars:** `SubObjectSystem` places `RequireElevated` sub-objects (pillars) from the same stored `Elevation`, against limit × (1, 2) + max(0, `elevationRange.min`):
+  - mid-span pillars need the edge's middle at ≥ 8 m;
+  - node pillars need the node at ≥ 8 m, or ≥ 4 m for edge-placed pillars when the edge's middle is ≥ 8 m.
+- **Where the stored `Elevation` comes from:**
+  1. `CourseSplitSystem` splits each course where the height above terrain changes type: ≥ 2, ≥ 4 m, ≤ −2, −4 or −12 m.
+  2. `GenerateEdgesSystem` writes the piece's elevation.
+  3. Absolute heights become height above the terrain at that point.
+- **So a CS1 ramp 5 m up is Raised in CS2**, i.e. retaining walls.
+- **Terrain:** for ground compositions (< 4 m), `FlattenTerrain` makes `TerrainSystem` fill and cut the terrain to the road, which gives the earth embankment. For Raised sides it does not raise the terrain (`float7 = −1e6`). For Elevated it only cuts below the deck. So the walls come from the composition, not from the terrain. Earth slopes come from the terrain flattening.
+
+**Option (0.9.39):**
+- **What it does:** per-edge `elevated: true`, or `options.elevatedFromStructure` for edges tagged `"structure": "elevated"`. After the import, the bridge raises the stored Elevation of the segments and inner nodes to 2 × the limit + 0.05, adds the component where missing, and marks them `Updated`. The composition then becomes Elevated and pillars are placed.
+- **What it leaves alone:** the geometry, and shared end nodes.
+- **When it reverts:** a later net-tool edit of such a segment recomputes the elevation from the terrain.
+
+**For the converter:** the alternative is to lift the ramps to ≥ 8.05 m above the terrain at every point, with no flag. That changes heights and is not what CS1 had.

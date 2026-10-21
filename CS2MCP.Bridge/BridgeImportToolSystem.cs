@@ -81,6 +81,8 @@ namespace CS2MCP
             public CompositionFlags Upgrades;
             /// <summary>Delete the generic Game.Objects.Pillar sub-objects of the built segments at the end of the import.</summary>
             public bool NoPillars;
+            /// <summary>0.9.39: raise the stored Elevation so the edge gets the Elevated composition and pillars.</summary>
+            public bool ForceElevated;
             /// <summary>Water-flow nets (dams): "auto" (default, as the net tool), "asIs" or "invert".</summary>
             public string Flow;
             public float FlowWeight;
@@ -1757,6 +1759,92 @@ namespace CS2MCP
             return pillars.Count;
         }
 
+        /// <summary>
+        /// 0.9.39, edges with elevated:true. CompositionSelectSystem takes the edge flags from
+        /// NetCompositionHelpers.GetElevationFlags: per side, max(min elevation at start, at end,
+        /// middle elevation) >= 2 x NetGeometryData.m_ElevationLimit (4 m for every road, so 8 m)
+        /// gives General.Elevated (deck on pillars); >= 1 x limit gives Side.Raised (retaining
+        /// walls); below that the ground composition, with FlattenTerrain raising the terrain to
+        /// the road (earth embankment). SubObjectSystem places RequireElevated pillars with the same
+        /// stored Elevation: limit x (1, 2) + max(0, elevationRange.min). A CS1 elevated ramp 5 m up
+        /// is therefore Raised in CS2. Raising the stored Elevation of the segments (middle) and of
+        /// the inner nodes to that threshold and marking them Updated gives the CS1 look without
+        /// moving the geometry. End nodes shared with other edges are left alone; an edge whose
+        /// middle is elevated needs only limit x 1 at its nodes for edge-placed pillars.
+        /// </summary>
+        private void ForceElevatedEdges()
+        {
+            int edges = 0, segmentsRaised = 0, nodesRaised = 0;
+            foreach (ImportEdge edge in m_Job.Edges)
+            {
+                if (!edge.ForceElevated || edge.Segments.Count == 0 || !EntityManager.HasComponent<NetGeometryData>(edge.Prefab))
+                {
+                    continue;
+                }
+                NetGeometryData geometry = EntityManager.GetComponentData<NetGeometryData>(edge.Prefab);
+                float rangeMin = EntityManager.HasComponent<PlaceableNetData>(edge.Prefab)
+                    ? math.max(0f, EntityManager.GetComponentData<PlaceableNetData>(edge.Prefab).m_ElevationRange.min)
+                    : 0f;
+                float threshold = geometry.m_ElevationLimit * 2f + rangeMin + 0.05f;
+                var set = new HashSet<Entity>(edge.Segments);
+                var nodes = new HashSet<Entity>();
+                edges++;
+                foreach (Entity segment in edge.Segments)
+                {
+                    if (!EntityManager.Exists(segment) || !EntityManager.HasComponent<Edge>(segment) || EntityManager.HasComponent<Deleted>(segment))
+                    {
+                        continue;
+                    }
+                    if (RaiseElevation(segment, threshold))
+                    {
+                        segmentsRaised++;
+                    }
+                    Edge e = EntityManager.GetComponentData<Edge>(segment);
+                    nodes.Add(e.m_Start);
+                    nodes.Add(e.m_End);
+                    EntityManager.AddComponent<Updated>(segment);
+                }
+                foreach (Entity node in nodes)
+                {
+                    if (!EntityManager.Exists(node) || !EntityManager.HasBuffer<ConnectedEdge>(node))
+                    {
+                        continue;
+                    }
+                    bool inner = true;
+                    foreach (ConnectedEdge connected in EntityManager.GetBuffer<ConnectedEdge>(node, true))
+                    {
+                        inner &= set.Contains(connected.m_Edge);
+                    }
+                    if (inner && RaiseElevation(node, threshold))
+                    {
+                        nodesRaised++;
+                    }
+                    EntityManager.AddComponent<Updated>(node);
+                }
+            }
+            if (edges > 0)
+            {
+                m_Job.Warnings.Add($"elevated: {edges} edge(s) forced to the Elevated composition ({segmentsRaised} segment(s) and {nodesRaised} inner node(s) had their stored Elevation raised to 2 x the prefab's elevation limit; geometry unchanged). A later net-tool edit of those segments recomputes the elevation from the terrain.");
+            }
+        }
+
+        private bool RaiseElevation(Entity entity, float threshold)
+        {
+            if (EntityManager.HasComponent<Game.Net.Elevation>(entity))
+            {
+                Game.Net.Elevation elevation = EntityManager.GetComponentData<Game.Net.Elevation>(entity);
+                if (math.all(elevation.m_Elevation >= threshold))
+                {
+                    return false;
+                }
+                elevation.m_Elevation = math.max(elevation.m_Elevation, threshold);
+                EntityManager.SetComponentData(entity, elevation);
+                return true;
+            }
+            EntityManager.AddComponentData(entity, new Game.Net.Elevation(new float2(threshold)));
+            return true;
+        }
+
         private void Finish(string abortReason)
         {
             BridgeResponse response;
@@ -1772,6 +1860,7 @@ namespace CS2MCP
                         noPillarSegments.AddRange(edge.Segments);
                     }
                 }
+                ForceElevatedEdges();
                 if (noPillarSegments.Count > 0)
                 {
                     int removed = RemovePillars(noPillarSegments, out int nodes);
