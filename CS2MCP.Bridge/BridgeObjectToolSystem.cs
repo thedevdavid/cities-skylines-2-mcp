@@ -39,6 +39,8 @@ namespace CS2MCP
             public float3 Position;
             public float Elevation;
             public quaternion Rotation;
+            /// <summary>0.9.50: pitch/roll/quaternion given; the report checks the live rotation.</summary>
+            public bool Tilted;
             public AgeMask Age;
             /// <summary>Net node an outside connection is attached to (CoursePos-like parent of the object).</summary>
             public Entity AttachTo;
@@ -958,6 +960,8 @@ namespace CS2MCP
             var byPrefab = new Dictionary<string, Dictionary<string, int>>();
             var failed = new List<object>();
             var results = m_Job.FullReport ? new List<object>(m_Job.Objects.Count) : null;
+            int tiltRequested = 0, tiltKept = 0;
+            var tiltChanged = new List<object>();
             foreach (ImportObject obj in m_Job.Objects)
             {
                 counts[obj.Status] = counts.TryGetValue(obj.Status, out int n) ? n + 1 : 1;
@@ -971,11 +975,40 @@ namespace CS2MCP
                 {
                     failed.Add(new { id = obj.Id, prefab = obj.PrefabName, error = obj.Error });
                 }
+                double? rotationError = null;
+                if (obj.Tilted)
+                {
+                    tiltRequested++;
+                    if (obj.Status == "created" && EntityManager.Exists(obj.Entity) && EntityManager.HasComponent<Transform>(obj.Entity))
+                    {
+                        quaternion live = EntityManager.GetComponentData<Transform>(obj.Entity).m_Rotation;
+                        float dot = math.abs(math.dot(live.value, obj.Rotation.value));
+                        rotationError = Math.Round(math.degrees(2f * math.acos(math.min(1f, dot))), 2);
+                        if (rotationError <= 0.5)
+                        {
+                            tiltKept++;
+                        }
+                        else if (tiltChanged.Count < kReportListCap)
+                        {
+                            float3 requestedUp = math.rotate(obj.Rotation, new float3(0f, 0f, 1f));
+                            float3 liveUp = math.rotate(live, new float3(0f, 0f, 1f));
+                            tiltChanged.Add(new
+                            {
+                                id = obj.Id,
+                                prefab = obj.PrefabName,
+                                rotationErrorDeg = rotationError,
+                                requestedForwardY = Math.Round(requestedUp.y, 4),
+                                liveForwardY = Math.Round(liveUp.y, 4),
+                            });
+                        }
+                    }
+                }
                 results?.Add(new
                 {
                     id = obj.Id,
                     status = obj.Status,
                     error = obj.Error,
+                    rotationErrorDeg = rotationError,
                     prefab = obj.PrefabName,
                     kind = obj.Kind,
                     entity = obj.Entity != Entity.Null ? $"{obj.Entity.Index}:{obj.Entity.Version}" : null,
@@ -1003,6 +1036,13 @@ namespace CS2MCP
                 completed = abortReason == null,
                 abortReason,
                 objects = new { requested = m_Job.Objects.Count, created = counts["created"], failed = counts["failed"], notRun = counts["pending"] },
+                tilt = tiltRequested == 0 ? null : new
+                {
+                    requested = tiltRequested,
+                    kept = tiltKept,
+                    changed = tiltChanged,
+                    note = "objects with pitch/roll/quaternion: the live Transform rotation compared with the request (kept = within 0.5 deg); changed lists those the game re-oriented (forwardY = height of the object's +z axis)",
+                },
                 byPrefab,
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 frames = m_Frames,

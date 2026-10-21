@@ -27,6 +27,12 @@ namespace CS2MCP
             public float z;
             public float? y;
             public float? rotation;
+            /// <summary>0.9.50: degrees about the object's x axis; positive tilts its +z end down.</summary>
+            public float? pitch;
+            /// <summary>0.9.50: degrees about the object's z axis; positive tilts its +x end up.</summary>
+            public float? roll;
+            /// <summary>0.9.50: full rotation [x, y, z, w]; overrides rotation/pitch/roll.</summary>
+            public float[] quaternion;
             public string kind;
             public string age;
             public string net;
@@ -257,7 +263,26 @@ namespace CS2MCP
                 position.y = y ?? ground;
                 obj.Position = position;
                 obj.Elevation = y.HasValue ? math.max(0f, y.Value - ground) : 0f;
-                obj.Rotation = quaternion.RotateY(math.radians(rotation));
+                if (dto.quaternion != null)
+                {
+                    if (dto.quaternion.Length != 4 || math.lengthsq(new float4(dto.quaternion[0], dto.quaternion[1], dto.quaternion[2], dto.quaternion[3])) < 1e-6f)
+                    {
+                        problems.Add($"object '{dto.id}': quaternion must be [x, y, z, w] with a non-zero length");
+                        continue;
+                    }
+                    obj.Rotation = math.normalize(new quaternion(dto.quaternion[0], dto.quaternion[1], dto.quaternion[2], dto.quaternion[3]));
+                    obj.Tilted = true;
+                }
+                else if ((dto.pitch ?? 0f) != 0f || (dto.roll ?? 0f) != 0f)
+                {
+                    // Unity's Quaternion.Euler(pitch, yaw, roll): roll about z, then pitch about x, then yaw about y.
+                    obj.Rotation = quaternion.EulerZXY(math.radians(new float3(dto.pitch ?? 0f, rotation, dto.roll ?? 0f)));
+                    obj.Tilted = true;
+                }
+                else
+                {
+                    obj.Rotation = quaternion.RotateY(math.radians(rotation));
+                }
                 if (!TryParseAge(dto.age, out obj.Age))
                 {
                     problems.Add($"object '{dto.id}': age must be seedling, sapling, adult or elderly");

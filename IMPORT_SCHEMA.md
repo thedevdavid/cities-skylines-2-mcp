@@ -270,6 +270,8 @@ MCP `cs2_import_objects` (`file` or inline `objects`), undo `POST /import/object
 | `x`, `z` | CS2 metres as in `/import/network`; must lie within ±7168 (+1 m). |
 | `y` | Optional absolute height. Omitted: the terrain surface at x,z. Above the terrain it becomes the object's elevation. |
 | `rotation` | Yaw in degrees, `quaternion.RotateY(radians)` = Unity `Quaternion.Euler(0, rotation, 0)`: 0 = prefab forward along +z, positive turns clockwise seen from above (90 = facing +x). To be confirmed in-game with an asymmetric building. |
+| `pitch`, `roll` | Optional degrees (0.9.50); default 0 keeps the yaw-only rotation. The rotation becomes Unity `Quaternion.Euler(pitch, rotation, roll)` (`quaternion.EulerZXY`): roll about the prefab's z axis, then pitch about its x axis, then the yaw. **Positive `pitch` tilts the prefab's +z end down** (for a slab rising 2 % toward its +z end, use `pitch` = −atan(0.02) = −1.146°). Positive `roll` tilts its +x end up. |
+| `quaternion` | Optional `[x, y, z, w]` (0.9.50), normalised. It overrides `rotation`, `pitch` and `roll`. |
 | `kind` | Hint only; the bridge classifies by prefab components (`tree`, `plant`, `building`, `outsideConnection`, `object`) and reports mismatches as warnings. `prop` and `decal` are accepted as aliases of `object`. |
 | `age` | Trees and bushes: `seedling` (AgeMask.Sapling, age 0), `sapling` (young/teen, AgeMask.Young, 0.175), `adult` (default, AgeMask.Mature, 0.425), `elderly` (AgeMask.Elderly, 0.775). Honoured in the editor too since 0.9.10 (the vanilla editor path picks a random age, 5 % of trees dead); never dead. Plants without `TreeData` (grass, ferns, flowers) ignore it. |
 | `net` | Outside connections: `road` or `rail` (see below); anything else (e.g. `air`, `ship`) places the prefab as a free border object. |
@@ -463,6 +465,12 @@ Other parameters and output:
 - **Owned segments:** `owned=true` includes them.
 
 POST body: `{paths: [...], radius, cell, area, owned, limit}`. Segments the game merged or re-split still count as present, because midpoints are tested against whole curves.
+
+**Tilt check (0.9.50):** for objects with `pitch`, `roll` or `quaternion`, the report's `tilt` block compares each created object's live Transform rotation with the request.
+- `requested` counts the tilted objects, and `kept` those within 0.5°.
+- `changed` lists the objects the game re-oriented, with `rotationErrorDeg` and the height of the +z axis requested vs live.
+- With `report: "full"`, each result also has `rotationErrorDeg`.
+- The bridge passes the full quaternion through `ControlPoint` → `ObjectDefinition` → `GenerateObjectsSystem`, which builds `Transform(position, rotation)`; no bridge step levels it. Whether a later game system levels it is what `tilt` measures.
 
 ## Removing objects by area (`POST /build/demolish-area`, 0.9.49)
 
