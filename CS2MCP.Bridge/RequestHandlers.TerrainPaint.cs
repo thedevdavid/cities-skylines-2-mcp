@@ -37,6 +37,8 @@ namespace CS2MCP
             public float? feather;
             public float? minStamp;
             public int? maxStamps;
+            /// <summary>0.9.44: "raster" (default: one masked brush per material and strength) or "stamp" (the 0.9.29 brush stamps).</summary>
+            public string method;
         }
 
         public sealed class TerrainPaintPolygonDto
@@ -249,6 +251,10 @@ namespace CS2MCP
             var problems = new List<string>();
             var plan = new List<(string id, Entity material, List<Stamp> stamps)>();
             int total = 0;
+            bool raster = !string.Equals(options.method, "stamp", StringComparison.OrdinalIgnoreCase);
+            var groups = new List<RasterGroup>();
+            int rasterPolygons = 0;
+            int rasterStrokes = 0;
             if (body.polygons != null)
             {
                 foreach (TerrainPaintPolygonDto poly in body.polygons)
@@ -266,6 +272,19 @@ namespace CS2MCP
                     if (!TryCleanPolygon(poly.polygon, out float2[] ring, out string why))
                     {
                         problems.Add($"polygon '{poly.id}': {why}");
+                        continue;
+                    }
+                    if (raster)
+                    {
+                        float strength = math.clamp(poly.strength ?? defaultStrength, 0f, 1f);
+                        RasterGroup group = groups.Find(g => g.Material == material && math.abs(g.Strength - strength) < 0.0005f);
+                        if (group == null)
+                        {
+                            group = new RasterGroup { Material = material, Strength = strength };
+                            groups.Add(group);
+                        }
+                        group.Polygons.Add((poly.id, ring, math.max(0f, poly.feather ?? defaultFeather), math.max(0f, poly.softEdge ?? defaultSoft)));
+                        rasterPolygons++;
                         continue;
                     }
                     var stamps = new List<Stamp>();
@@ -288,6 +307,19 @@ namespace CS2MCP
                         problems.Add($"stroke '{s.id}': unknown material '{s.material}'; available: {string.Join(", ", materialNames)} (or Extra1..Extra4)");
                         continue;
                     }
+                    if (raster)
+                    {
+                        float strength = math.clamp(s.strength ?? defaultStrength, 0f, 1f);
+                        RasterGroup group = groups.Find(g => g.Material == material && math.abs(g.Strength - strength) < 0.0005f);
+                        if (group == null)
+                        {
+                            group = new RasterGroup { Material = material, Strength = strength };
+                            groups.Add(group);
+                        }
+                        group.Strokes.Add((s.id, new float2(s.x, s.z), s.radius));
+                        rasterStrokes++;
+                        continue;
+                    }
                     plan.Add((s.id, material, new List<Stamp> { new Stamp { Centre = new float2(s.x, s.z), Radius = s.radius, Strength = math.clamp(s.strength ?? defaultStrength, 0f, 1f) } }));
                     total++;
                 }
@@ -305,6 +337,8 @@ namespace CS2MCP
                 return BridgeResponse.Json(new
                 {
                     dryRun = true,
+                    method = raster ? "raster" : "stamp",
+                    rasterGroups = groups.ConvertAll(g => (object)new { material = prefabSystem.GetPrefab<PrefabBase>(g.Material).name, strength = g.Strength, polygons = g.Polygons.Count, strokes = g.Strokes.Count }),
                     brush = brush.name,
                     stamps = total,
                     items = plan.ConvertAll(p => (object)new { id = p.id, material = prefabSystem.GetPrefab<PrefabBase>(p.material).name, stamps = p.stamps.Count }),
@@ -328,6 +362,50 @@ namespace CS2MCP
                 World = Snapshot(materialSystem.UserSplatmapWorld),
             };
             int painted = 0;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            List<object> rasterDetails = null;
+            string calibration = null;
+            if (groups.Count > 0)
+            {
+                RasterCalibration cal = null;
+                if (!ResolveRasterApi(out string apiError))
+                {
+                    problems.Add(apiError);
+                }
+                else
+                {
+                    if (s_RasterCalibration == null)
+                    {
+                        s_RasterCalibration = Calibrate(materialSystem, groups[0].Material);
+                        calibration = s_RasterCalibration == null ? "failed" : "measured: " + s_RasterCalibration.Detail;
+                    }
+                    cal = s_RasterCalibration;
+                }
+                if (cal != null)
+                {
+                    calibration = calibration ?? "cached";
+                    rasterDetails = RasterPaint(materialSystem, groups, cal, clock, brush.m_Texture);
+                    painted += groups.Count;
+                }
+                else
+                {
+                    // Fall back to stamps for this import.
+                    calibration = (calibration ?? "unavailable") + "; fell back to stamps";
+                    foreach (RasterGroup g in groups)
+                    {
+                        foreach ((string pid, float2[] ring, float feather, float soft) in g.Polygons)
+                        {
+                            var stamps = new List<Stamp>();
+                            FillPolygon(ring, soft, feather, minStamp, g.Strength, stamps);
+                            plan.Add((pid, g.Material, stamps));
+                        }
+                        foreach ((string sid, float2 c, float radius) in g.Strokes)
+                        {
+                            plan.Add((sid, g.Material, new List<Stamp> { new Stamp { Centre = c, Radius = radius, Strength = g.Strength } }));
+                        }
+                    }
+                }
+            }
             foreach ((string itemId, Entity material, List<Stamp> stamps) in plan)
             {
                 foreach (Stamp s in stamps)
@@ -359,7 +437,13 @@ namespace CS2MCP
                 importId = id,
                 name = undo.Name,
                 brush = brush.name,
-                items = plan.Count,
+                method = raster ? "raster" : "stamp",
+                calibration,
+                rasterPolygons,
+                rasterStrokes,
+                raster = rasterDetails,
+                seconds = Math.Round(clock.Elapsed.TotalSeconds, 2),
+                items = plan.Count + rasterPolygons + rasterStrokes,
                 stamps = painted,
                 netGuard = guard.Report(),
                 undo = "POST /import/terrain-paint/undo (newest import first; the last 3 are kept, in memory only)",

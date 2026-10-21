@@ -195,5 +195,37 @@ namespace CS2MCP
             entityManager.AddComponent(entity, s_PreventOverride);
             return true;
         }
+
+        /// <summary>0.9.44: Protect for a whole batch with one structural change.</summary>
+        public static int ProtectMany(EntityManager entityManager, List<Entity> entities)
+        {
+            Resolve();
+            if (!s_Available || entities.Count == 0)
+            {
+                return 0;
+            }
+            var eligible = new NativeList<Entity>(entities.Count, Allocator.Temp);
+            try
+            {
+                foreach (Entity entity in entities)
+                {
+                    if (entityManager.Exists(entity) && !entityManager.HasComponent<Owner>(entity)
+                        && !entityManager.HasComponent<Game.Buildings.Building>(entity) && entityManager.HasComponent<Game.Objects.Static>(entity)
+                        && !entityManager.HasComponent(entity, s_PreventOverride))
+                    {
+                        eligible.Add(entity);
+                    }
+                }
+                if (eligible.Length > 0)
+                {
+                    entityManager.AddComponent(eligible.AsArray(), s_PreventOverride);
+                }
+                return eligible.Length;
+            }
+            finally
+            {
+                eligible.Dispose();
+            }
+        }
     }
 }

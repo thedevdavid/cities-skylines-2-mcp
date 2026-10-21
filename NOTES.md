@@ -957,3 +957,33 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Safe sequence:** build → `/map/save` → look posts, one per request, after the previous answer → save.
 
 **"CSS parsing error … 5.000000e-02":** not the bridge's. CS2MCP has no UI module or CSS. Another mod's UI writes a float in exponent form.
+
+## Round 44 (0.9.44): raster terrain paint, object import timing
+
+**Owner: ~18 min of bridge time per build.** A-v10 terrain paint took 673 s: 5,406 polygons became ~1.6 M stamps, plus 88,983 strokes, each one `ApplyBrush`. Trees took 368 s for 505 k (0.73 ms each).
+
+**Raster paint (`options.method`, default `"raster"`; `"stamp"` = 0.9.29 behaviour):**
+- **Grouping:** polygons and strokes are grouped by (material, strength).
+- **Rasterising:** each group becomes one CPU coverage grid at splatmap resolution (3.5 m, ≤ 4096²).
+  - Polygons use scanline inside, with distance bands for feather (inward ramp) and softEdge (outward ramp, only without feather).
+  - Strokes are the brush prefab's own texture (read back once, 64²), scaled to the disc.
+  - Overlaps combine as 1 − Π(1 − vᵢ·s); the uploaded mask is that divided by s. This equals repeated stamps if the kernel moves a texel toward the target by brush × strength.
+- **Dispatch:** the grid is uploaded as an RGBA32 linear texture and passed as the brush texture of one square brush over the group bounds. It goes to the game's private `TerrainMaterialSystem.ApplyToSplatmap`, once for each splatmap. The paint/erase kernel, the channel and the strength handling are the game's.
+- **Calibration:** the first raster paint of a session paints a 16² test mask (one quadrant 255, a neighbouring one 128) at the playable centre, reads 4 probes and 4 corners, and restores both splatmaps.
+  - It finds the uv → x/z flips and transpose, and whether the kernel clips to the inscribed circle (then the brush square is enlarged by √2).
+  - `calibration` in the response shows the raw changes. The 128 quadrant's change should be about half the 255 one if the kernel is linear.
+  - If the result is inconclusive, the import falls back to stamps.
+- **Differences from stamping:**
+  - The quadtree stamps overlapped (radius 0.75 × cell), so stamped interiors with strength < 1 got more than the requested strength. The raster interior gets exactly the strength.
+  - Edges follow the feather/softEdge ramps instead of the brush falloff of edge stamps.
+- **Timing:** the response gives `seconds` and, per group, `rasterMs`, `uploadMs` and `dispatchMs`.
+
+**Objects:**
+- **Batched protection:** Anarchy's `PreventOverride` is added once per batch (`EntityManager.AddComponent(NativeArray, type)`) instead of per entity.
+- **New `timing` block in the report:** defineMs, matchMs, applyFrameMs (the game's work from Apply to resolve), resolveMs, protectMs, netGuardMs and settleFrames. It is there to find where the 0.73 ms per tree goes before replacing the tool pipeline.
+- **Not built yet:** direct bulk entity creation, i.e. reproducing `GenerateObjectsSystem` + `ApplyObjectsSystem`. That waits until the timing shows the game's apply frame dominates.
+
+**Perf test bodies** (root repo, `net-converter/out/perf/`):
+- `perf-paint-400.json`: 400 polygons + 2,000 strokes, raster.
+- `perf-paint-400-stamp.json`: the same body with `method: "stamp"`.
+- `perf-trees-100k.json`: batchSize 5000, bypassValidation.

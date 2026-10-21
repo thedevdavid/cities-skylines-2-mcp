@@ -216,6 +216,12 @@ namespace CS2MCP
         private EntityQuery m_GuardEdgeQuery;
         private NetGuard m_NetGuard;
         private int m_Protected;
+        // 0.9.44: where an object import spends its time (milliseconds of bridge code per stage,
+        // plus wall time between setting Apply and resolving, which is the game's apply frame).
+        private readonly System.Diagnostics.Stopwatch m_StageClock = new System.Diagnostics.Stopwatch();
+        private double m_DefineMs, m_MatchMs, m_ResolveMs, m_ProtectMs, m_GuardMs, m_ApplyWaitMs;
+        private int m_SettleFramesTotal;
+        private DateTime m_ApplySetAt;
 
         public bool TryStartImport(ObjectJob job, BridgeRequest request)
         {
@@ -226,6 +232,8 @@ namespace CS2MCP
             m_Job = job;
             m_NetGuard = new NetGuard(EntityManager, m_GuardEdgeQuery);
             m_Protected = 0;
+            m_DefineMs = m_MatchMs = m_ResolveMs = m_ProtectMs = m_GuardMs = m_ApplyWaitMs = 0;
+            m_SettleFramesTotal = 0;
             m_Record = new ObjectRecord { Id = job.Id, Name = job.Name };
             m_UndoTarget = null;
             m_Queue.Clear();
@@ -410,6 +418,7 @@ namespace CS2MCP
             }
             m_Current = m_Queue[0];
             m_Queue.RemoveAt(0);
+            m_StageClock.Restart();
             if (m_Current.Delete)
             {
                 EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
@@ -446,7 +455,9 @@ namespace CS2MCP
             }
             applyMode = ApplyMode.Clear;
             m_SettleLeft = m_Job != null ? m_Job.SettleFrames : 1;
+            m_SettleFramesTotal += m_SettleLeft;
             m_Stage = Stage.Settle;
+            m_DefineMs += m_StageClock.Elapsed.TotalMilliseconds;
         }
 
         private CreateDefinitions NewDefinitionsTemplate()
@@ -592,9 +603,12 @@ namespace CS2MCP
             {
                 if (!m_Current.Delete)
                 {
+                    m_StageClock.Restart();
                     MatchTempObjects();
+                    m_MatchMs += m_StageClock.Elapsed.TotalMilliseconds;
                 }
                 applyMode = ApplyMode.Apply;
+                m_ApplySetAt = DateTime.UtcNow;
                 m_BatchesApplied++;
                 m_Stage = Stage.Resolve;
                 return;
@@ -725,6 +739,9 @@ namespace CS2MCP
 
         private void StageResolve()
         {
+            m_ApplyWaitMs += (DateTime.UtcNow - m_ApplySetAt).TotalMilliseconds;
+            m_StageClock.Restart();
+            var protect = new List<Entity>();
             if (m_Current.Delete)
             {
                 m_Deleted += m_Current.Indices.Count;
@@ -742,9 +759,9 @@ namespace CS2MCP
                         m_Record.Entities.Add(entity);
                         // What Anarchy's toggle would have added: keeps the object visible where a
                         // net or area overlaps it (the game's Overridden flag).
-                        if (m_Job.BypassValidation && obj.Polygon == null && AnarchyProtection.Protect(EntityManager, entity))
+                        if (m_Job.BypassValidation && obj.Polygon == null)
                         {
-                            m_Protected++;
+                            protect.Add(entity);
                         }
                     }
                     else
@@ -754,6 +771,14 @@ namespace CS2MCP
                     }
                 }
             }
+            m_ResolveMs += m_StageClock.Elapsed.TotalMilliseconds;
+            if (protect.Count > 0)
+            {
+                m_StageClock.Restart();
+                m_Protected += AnarchyProtection.ProtectMany(EntityManager, protect);
+                m_ProtectMs += m_StageClock.Elapsed.TotalMilliseconds;
+            }
+            m_StageClock.Restart();
             if (!m_Current.Delete && m_NetGuard != null)
             {
                 var ids = new List<string>();
@@ -763,6 +788,7 @@ namespace CS2MCP
                 }
                 m_NetGuard.AfterBatch($"batch {m_BatchesApplied}", ids, GuardPrefabName);
             }
+            m_GuardMs += m_StageClock.Elapsed.TotalMilliseconds;
             m_Current = null;
             m_Stage = Stage.Define;
         }
@@ -919,6 +945,17 @@ namespace CS2MCP
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 frames = m_Frames,
                 seconds = Math.Round((DateTime.UtcNow - m_Started).TotalSeconds, 1),
+                timing = new
+                {
+                    defineMs = Math.Round(m_DefineMs),
+                    matchMs = Math.Round(m_MatchMs),
+                    applyFrameMs = Math.Round(m_ApplyWaitMs),
+                    resolveMs = Math.Round(m_ResolveMs),
+                    protectMs = Math.Round(m_ProtectMs),
+                    netGuardMs = Math.Round(m_GuardMs),
+                    settleFrames = m_SettleFramesTotal,
+                    note = "bridge milliseconds per stage, summed over batches; applyFrameMs = wall time from Apply to resolve (the game's generate/validate/apply work for the batch); the rest of 'seconds' is settle frames and other game frames",
+                },
                 validation = new
                 {
                     bypassValidation = m_Job.BypassValidation,

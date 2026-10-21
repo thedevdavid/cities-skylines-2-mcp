@@ -386,6 +386,11 @@ Statuses: connections `created` / `mapped` (dry run) / `skipped`; arrows also `s
 
 ## Terrain material painting (`POST /import/terrain-paint`, 0.9.29)
 
+**0.9.44, `options.method`:**
+- **`"raster"` (default):** one masked brush per (material, strength) group, through the game's own paint kernel, after a one-time calibration per session. See NOTES.md round 44.
+- **`"stamp"`:** the 0.9.29 brush stamps.
+- **Response fields:** `method`, `calibration`, `rasterPolygons`, `rasterStrokes`, `raster` (per-group timings) and `seconds`.
+
 This is the editor's **Terrain → Materials** brushes, not area surfaces. They paint the terrain's user splatmaps, which give soft-edged ground textures under everything, and they are saved with the map.
 
 **How the game does it** (decompiled):
