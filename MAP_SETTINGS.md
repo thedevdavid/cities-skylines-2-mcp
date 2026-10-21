@@ -217,3 +217,13 @@ POST /map/time { "reset": true }
 ```
 
 It is a preview only and is not saved with the map. The season look follows the date through the climate's seasons.
+
+**0.9.37, climate readout:**
+- **Why the HUD looks stuck:** `ClimateSystem.OnUpdate` is the only writer of temperature, precipitation, cloudiness, aurora, fog, season and weather. It runs in the `EditorSimulation` phase, which runs only in simulation steps, i.e. while the clock runs. Paused, the HUD (`ClimateUISystem` binds `ClimateSystem.temperature`) keeps the last sample. `SnowSystem` likewise needs running steps.
+- **`POST {..., "settle": seconds, "speed": 1-3}`:** runs the clock for that many real seconds, at most 600, then pauses it again. BridgeSystem enforces the deadline every frame. Snow needs simulated hours to build up.
+- **GET (and the POST response):**
+  - `live`: ClimateSystem's current values, override state, rain/snow flags, season, freezingTemperature, averageTemperature, temperatureBaseHeight and classification.
+  - `sampleAtDate`: `ClimateSystem.SampleClimate(currentDate)`, computed now and valid while paused, with overrides applied.
+  - `climate`: the current climate prefab's name, `daysPerYear`, `normalizedDate`, the temperature curve's key count and span, and 12 monthly samples (`temperatureNoon` at t = (m + 0.5)/12, `temperatureMidnight` at t = m/12, plus precipitation, cloudiness and fog).
+- **Why those sample points:** `RebuildTemperatureCurves` writes 288 keys, 24 per month unit, so each month unit is one day cycle (a CS2 day is a month).
+- **`POST /map/settings` with `climateEdit`:** the response adds the same `climateSample`, so a copy whose curves were not rebuilt shows at once.

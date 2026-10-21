@@ -140,6 +140,7 @@ namespace CS2MCP
                 problems = request.Method == "POST" ? problems : null,
                 settings,
                 look = ReadLook(detail),
+                climateSample = request.Method == "POST" && (request.Body ?? "").Contains("climateEdit") ? ClimateMonthly() : null,
                 notWritable = new[]
                 {
                     "name", "description", "preview", "thumbnail", "startingTiles (count is reported; select them in the editor)",

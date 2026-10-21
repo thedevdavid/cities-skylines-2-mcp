@@ -396,6 +396,62 @@ namespace CS2MCP
         }
 
 
+        private static object SampleObject(ClimateSystem.ClimateSample c)
+        {
+            return new
+            {
+                temperature = Math.Round(c.temperature, 2),
+                precipitation = Math.Round(c.precipitation, 3),
+                cloudiness = Math.Round(c.cloudiness, 3),
+                aurora = Math.Round(c.aurora, 3),
+                fog = Math.Round(c.fog, 3),
+            };
+        }
+
+        /// <summary>
+        /// The current climate prefab and its curves sampled at mid-month (raw curves, no overrides),
+        /// to see whether an edited "(copy)" was rebuilt.
+        /// </summary>
+        private object ClimateMonthly()
+        {
+            ClimateSystem climate = World.GetOrCreateSystemManaged<ClimateSystem>();
+            TimeSystem time = World.GetOrCreateSystemManaged<TimeSystem>();
+            if (climate.currentClimate == Unity.Entities.Entity.Null)
+            {
+                return new { error = "no current climate" };
+            }
+            var prefab = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>().GetPrefab<Game.Prefabs.Climate.ClimatePrefab>(climate.currentClimate);
+            var months = new List<object>();
+            for (int m = 0; m < 12; m++)
+            {
+                float t = (m + 0.5f) / 12f;
+                ClimateSystem.ClimateSample c = climate.SampleClimate(prefab, t);
+                ClimateSystem.ClimateSample night = climate.SampleClimate(prefab, m / 12f);
+                months.Add(new
+                {
+                    month = m + 1,
+                    t = Math.Round(t, 4),
+                    temperatureNoon = Math.Round(c.temperature, 1),
+                    temperatureMidnight = Math.Round(night.temperature, 1),
+                    precipitation = Math.Round(c.precipitation, 2),
+                    cloudiness = Math.Round(c.cloudiness, 2),
+                    fog = Math.Round(c.fog, 2),
+                });
+            }
+            return new
+            {
+                prefab = prefab.name,
+                daysPerYear = time.daysPerYear,
+                normalizedDate = time.normalizedDate,
+                temperatureKeys = prefab.m_Temperature?.length ?? 0,
+                curveSpan = prefab.m_Temperature != null && prefab.m_Temperature.length > 0
+                    ? new[] { prefab.m_Temperature[0].time, prefab.m_Temperature[prefab.m_Temperature.length - 1].time }
+                    : null,
+                monthly = months,
+                note = "curves sampled at t*daysPerYear (ClimateSystem.SampleClimate). RebuildTemperatureCurves writes 288 keys, 24 per month unit, one day cycle per month (a CS2 day is a month): t=(m+0.5)/12 is that month's noon, t=m/12 its midnight",
+            };
+        }
+
         public sealed class MapTimeDto
         {
             public int? month;
@@ -404,6 +460,10 @@ namespace CS2MCP
             public float? date;
             public float? cloudiness;
             public bool? reset;
+            /// <summary>0.9.37: run the clock this many real seconds, then pause again.</summary>
+            public float? settle;
+            /// <summary>Simulation speed for settle (default 1).</summary>
+            public float? speed;
         }
 
         /// <summary>
@@ -464,6 +524,16 @@ namespace CS2MCP
                     climate.cloudiness.overrideState = true;
                     applied.Add($"cloudiness {body.cloudiness.Value:F2}");
                 }
+                if (body.settle.HasValue && body.settle.Value > 0f)
+                {
+                    // ClimateSystem (EditorSimulation phase) and SnowSystem only update in simulation
+                    // steps, i.e. while the clock runs; paused, the HUD keeps a stale sample.
+                    float seconds = math.min(body.settle.Value, 600f);
+                    float speed = math.clamp(body.speed ?? 1f, 1f, 3f);
+                    World.GetOrCreateSystemManaged<SimulationSystem>().selectedSpeed = speed;
+                    BridgeSystem.Instance.AutoPauseAt = DateTime.Now.AddSeconds(seconds);
+                    applied.Add($"clock running at speed {speed} for {seconds:F0} s, then paused");
+                }
             }
             return BridgeResponse.Json(new
             {
@@ -476,7 +546,27 @@ namespace CS2MCP
                 cloudiness = (float)climate.cloudiness,
                 cloudinessOverridden = climate.cloudiness.overrideState,
                 temperature = (float)climate.temperature,
-                note = "editor preview (bottom bar): not saved with the map; season visuals follow the date through the climate's seasons",
+                settleUntil = BridgeSystem.Instance.AutoPauseAt?.ToString("HH:mm:ss"),
+                running = World.GetOrCreateSystemManaged<SimulationSystem>().selectedSpeed > 0f,
+                live = new
+                {
+                    temperature = climate.temperature.value,
+                    temperatureOverridden = climate.temperature.overrideState,
+                    precipitation = (float)climate.precipitation,
+                    fog = (float)climate.fog,
+                    aurora = (float)climate.aurora,
+                    climate.isRaining,
+                    climate.isSnowing,
+                    climate.isPrecipitating,
+                    season = climate.currentSeasonName,
+                    climate.freezingTemperature,
+                    climate.averageTemperature,
+                    climate.temperatureBaseHeight,
+                    classification = climate.classification.ToString(),
+                },
+                sampleAtDate = SampleObject(climate.SampleClimate((float)climate.currentDate)),
+                climate = ClimateMonthly(),
+                note = "editor preview (bottom bar): not saved with the map. live values only update while the clock runs (ClimateSystem runs in EditorSimulation steps); sampleAtDate is computed now from the current climate curves (overrides applied); use settle:<seconds> to let weather and snow catch up",
             });
         }
     }

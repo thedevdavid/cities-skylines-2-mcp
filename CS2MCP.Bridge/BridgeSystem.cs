@@ -41,6 +41,9 @@ namespace CS2MCP
             AutoPauseTargetFrame = targetFrame;
         }
 
+        /// <summary>0.9.37: wall-clock auto-pause for /map/time settle (null = disabled).</summary>
+        public DateTime? AutoPauseAt { get; set; }
+
         [Preserve]
         protected override void OnCreate()
         {
@@ -89,6 +92,12 @@ namespace CS2MCP
                 m_SimulationSystem.selectedSpeed = 0f;
                 AutoPauseTargetFrame = 0;
                 Mod.Log.Info("timed run finished, simulation auto-paused");
+            }
+            if (AutoPauseAt.HasValue && DateTime.Now >= AutoPauseAt.Value)
+            {
+                m_SimulationSystem.selectedSpeed = 0f;
+                AutoPauseAt = null;
+                Mod.Log.Info("map/time settle finished, simulation paused");
             }
             m_Handlers.EnsureHierarchyCacheCapacity();
             m_Handlers.PumpTerrainTextureJob();
