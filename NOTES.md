@@ -815,3 +815,22 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 **No crash dumps:** neither `%LOCALAPPDATA%\Temp\Colossal Order\Cities Skylines II\Crashes`, LocalLow `Crashes`, nor `%LOCALAPPDATA%\CrashDumps` has a Cities2 dump.
 
 **Owner note:** three saves under the name of the crashed 16:55 save were silently dropped. A bridge `/map/save` that reports the real outcome is a candidate follow-up.
+
+## Round 36 (0.9.36): aux-net owners refused
+
+**Reproduced by the owner (17:44, 0.9.33):**
+- **The body:** a single `BXP Double Deck Suspension Bridge - Highway` edge, 976 m at deck Y 148, with nodesFirst, bypass and batchSize 1, and no Lower Highway edge. The dry run said valid, 3 × 325 m.
+- **Outcome:** an instant native crash with no managed stack, the same as 16:11.
+- **Control:** option 2 (`BXP Suspension Bridge - Highway Twoway - 6 Lanes`) imported fine 3 minutes earlier.
+
+**Why it can die natively (from the code, not proven by a dump):**
+- **Where the aux nets are built:** the upper deck's `AuxiliaryNets` (lower deck at `m_Position.y` below it) is expanded inside the Burst jobs of `CourseSplitSystem`: `CheckCourseIntersectionsJob` with `m_AuxIndex`, `MergeAuxPositions` and `auxIntersectionEntities`. A release build has no bounds checks there, so an index error is a native crash.
+- **Our input differs from the vanilla tool's in three ways:**
+  1. nodesFirst attaches the course to standalone nodes built beforehand. The aux positions reset `m_CoursePos.m_Entity` to null, so aux end nodes must be created inside the same course.
+  2. The single course covers 3 fixed segments.
+  3. It is a dead end at both ends, in the air.
+- **The vanilla tool treats these prefabs specially:** `NetToolSystem` refuses replace/upgrade into any prefab with aux nets (`AllowReplace` requires an empty `AuxiliaryNet` buffer).
+
+**Bridge:** `/import/network` refuses any edge whose prefab has `AuxiliaryNets`, naming its aux nets; `options.allowAuxiliaryNets` overrides. Together with 0.9.33's aux-only check, the whole family is covered: the BXP Double Deck Highway, Subway and Train, Golden Gate Bridge Subway and Train, and the ExtradosedBridge01 PedsBikes, Public Transport, Subway and Tram.
+
+**Still unexplained:** the 16:55 save failure, the `SerializerSystem` NRE in the chunk store. Candidates are the duplicate "(copy)" prefab ID (fixed in 0.9.35), and leftover damage from the 16:11-type aux-course crash path if a partial aux build happened without killing the process.
