@@ -1076,3 +1076,22 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - The elevation becomes y − terrain, negative allowed.
 - After creation the bridge restores the requested position and rotation, sets the Elevation with `OnGround` cleared, and marks the object Updated. `GroundHeightSystem` then skips it.
 - The report counts `pinned`.
+
+## Round 52 (0.9.52): mod failed to load (Traffic reference)
+
+**Symptom (15:32, 0.9.51):**
+- The main menu showed "CS2MCP — Mod failed to load". /ping did not answer, and no CS2MCP.log was written.
+- Modding.log has only "Loaded CS2MCP … in 1.8 ms", with no exception anywhere.
+- No other code mod wrote its log this start (no Traffic.Mod.log), so the playset's PDX code mods were not loaded.
+
+**Cause (decompiled `ModManager.ModInfo.Load`):**
+- If `asset.canBeLoaded` is false (a referenced assembly does not resolve), it sets `State.MissedDependenciesError` and returns. It does not load the assembly or run `OnLoad`, and logs nothing; the error text appears only in the notification.
+- CS2MCP.dll had a compile-time reference to Traffic.dll (TM:PE importer), so the whole bridge failed whenever Traffic was not loaded. The old comment "the bridge loads without Traffic" was wrong for the mod manager.
+
+**Fix:**
+- `TrafficLaneImport` moved to a satellite project, `CS2MCP.Traffic`. It references CS2MCP (`InternalsVisibleTo`) and Traffic.
+- It is deployed as `Mods/CS2MCP/CS2MCP.Traffic.bin`; not `.dll`, so the mod manager does not scan it.
+- `BridgeTmpeImportSystem` loads it with `Assembly.Load(bytes)` on the first `/import/tmpe`, and only when an assembly named Traffic is in the AppDomain. Without Traffic, `/import/tmpe` answers 503 with the reason.
+- CS2MCP.dll now references only the game's Managed assemblies.
+
+**Build:** `dotnet build CS2MCP.Traffic/CS2MCP.Traffic.csproj -c Release` builds and deploys both.

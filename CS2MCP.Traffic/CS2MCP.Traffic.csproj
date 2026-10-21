@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 0.9.52: the Traffic (PDX 80095) lane-connection writer, split out of CS2MCP.dll.
+       The game's mod manager refuses to load a mod with an unresolved compile-time reference
+       (ModInfo.State.MissedDependenciesError, no exception, no log): CS2MCP.dll referenced
+       Traffic.dll, so the whole bridge failed whenever Traffic was not loaded. This assembly is
+       deployed as CS2MCP.Traffic.bin (not .dll, so the mod manager does not scan it) and loaded by
+       the bridge with Assembly.Load(bytes) only when Traffic is present. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>CS2MCP.Traffic</AssemblyName>
+    <RootNamespace>CS2MCP</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GamePath Condition="'$(GamePath)' == '' And '$(CS2_PATH)' != ''">$(CS2_PATH)</GamePath>
+    <GamePath Condition="'$(GamePath)' == '' And '$(CSII_INSTALLATIONPATH)' != ''">$(CSII_INSTALLATIONPATH)</GamePath>
+    <GamePath Condition="'$(GamePath)' == '' And Exists('C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Game.dll')">C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II</GamePath>
+    <GamePath Condition="'$(GamePath)' == '' And Exists('D:\SteamLibrary\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Game.dll')">D:\SteamLibrary\steamapps\common\Cities Skylines II</GamePath>
+    <ManagedDLLPath>$(GamePath)\Cities2_Data\Managed</ManagedDLLPath>
+    <TrafficDllPath Condition="'$(TrafficDllPath)' == ''">$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II\.cache\Mods\pdx_mods\80095_29\Traffic.dll</TrafficDllPath>
+    <ModDeployPath>$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II\Mods\CS2MCP</ModDeployPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CS2MCP.Bridge\CS2MCP.Bridge.csproj" Private="false" />
+    <Reference Include="Game"><HintPath>$(ManagedDLLPath)\Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Core"><HintPath>$(ManagedDLLPath)\Colossal.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Logging"><HintPath>$(ManagedDLLPath)\Colossal.Logging.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Mathematics"><HintPath>$(ManagedDLLPath)\Colossal.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Colossal.Collections"><HintPath>$(ManagedDLLPath)\Colossal.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Entities"><HintPath>$(ManagedDLLPath)\Unity.Entities.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Collections"><HintPath>$(ManagedDLLPath)\Unity.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>$(ManagedDLLPath)\Unity.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Burst"><HintPath>$(ManagedDLLPath)\Unity.Burst.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDLLPath)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(ManagedDLLPath)\Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Traffic"><HintPath>$(TrafficDllPath)</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="DeploySatellite" AfterTargets="Build" Condition="'$(SkipDeploy)' != 'true'">
+    <MakeDir Directories="$(ModDeployPath)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).dll" DestinationFiles="$(ModDeployPath)\$(TargetName).bin" />
+    <Message Importance="high" Text="CS2MCP.Traffic deployed to $(ModDeployPath)\$(TargetName).bin" />
+  </Target>
+
+</Project>
