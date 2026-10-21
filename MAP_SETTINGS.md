@@ -227,3 +227,13 @@ It is a preview only and is not saved with the map. The season look follows the 
   - `climate`: the current climate prefab's name, `daysPerYear`, `normalizedDate`, the temperature curve's key count and span, and 12 monthly samples (`temperatureNoon` at t = (m + 0.5)/12, `temperatureMidnight` at t = m/12, plus precipitation, cloudiness and fog).
 - **Why those sample points:** `RebuildTemperatureCurves` writes 288 keys, 24 per month unit, so each month unit is one day cycle (a CS2 day is a month).
 - **`POST /map/settings` with `climateEdit`:** the response adds the same `climateSample`, so a copy whose curves were not rebuilt shows at once.
+
+**0.9.40–0.9.41, climate overrides:**
+- **Where they come from:** Time and Weather Anarchy (PDX 88893) applies its selected profile's overrides in the main menu: temperature, precipitation, cloudiness, fog, aurora and date. In the editor it stops updating them but never clears them. Its "desert" profile (31 °C, no precipitation, lat 40.77 / lon 116.05) pinned A-v9's readings.
+- **Editor load:** since 0.9.41 the bridge clears the five weather overrides when an editor map loads, and logs which were on. It leaves the date alone.
+- **`POST {"clearOverrides": true}`:** clears the five weather overrides at any time. It also clears the date override unless the same call sets a date. The response lists the overrides that were on.
+- **GET:** `overrides` shows the state and value of every override, and `timeWeatherAnarchy` shows the mod's selected profile.
+- **Date from `month` + `hour`:**
+  - **With `day`:** day-of-month positions the date within the month, as before.
+  - **Without `day`:** the date is (month − 1 + hour/24)/12, because a CS2 day is one month unit of the climate curves. So `hour` sets both the sun and the climate's hour of day.
+  - **`date`:** sets the curve position directly.

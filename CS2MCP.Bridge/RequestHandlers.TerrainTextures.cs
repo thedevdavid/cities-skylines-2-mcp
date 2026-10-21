@@ -396,6 +396,30 @@ namespace CS2MCP
         }
 
 
+        /// <summary>Switches the climate overrides off; returns the names of those that were on.</summary>
+        internal static List<string> ClearClimateOverrides(ClimateSystem climate, bool includeDate)
+        {
+            var cleared = new List<string>();
+            void Clear(string name, Game.OverridableProperty<float> property)
+            {
+                if (property.overrideState)
+                {
+                    cleared.Add($"{name} {property.overrideValue:0.##}");
+                    property.overrideState = false;
+                }
+            }
+            Clear("temperature", climate.temperature);
+            Clear("precipitation", climate.precipitation);
+            Clear("cloudiness", climate.cloudiness);
+            Clear("fog", climate.fog);
+            Clear("aurora", climate.aurora);
+            if (includeDate)
+            {
+                Clear("date", climate.currentDate);
+            }
+            return cleared;
+        }
+
         private object CurveAtDate(ClimateSystem climate)
         {
             if (climate.currentClimate == Unity.Entities.Entity.Null)
@@ -517,6 +541,8 @@ namespace CS2MCP
             public float? date;
             public float? cloudiness;
             public bool? reset;
+            /// <summary>0.9.41: switch off the temperature / precipitation / cloudiness / fog / aurora overrides (and the date override unless a date is given).</summary>
+            public bool? clearOverrides;
             /// <summary>0.9.37: run the clock this many real seconds, then pause again.</summary>
             public float? settle;
             /// <summary>Simulation speed for settle (default 1).</summary>
@@ -555,6 +581,12 @@ namespace CS2MCP
                     climate.cloudiness.overrideState = false;
                     applied.Add("reset");
                 }
+                if (body.clearOverrides == true)
+                {
+                    bool keepDate = body.date.HasValue || body.month.HasValue;
+                    List<string> cleared = ClearClimateOverrides(climate, !keepDate);
+                    applied.Add(cleared.Count > 0 ? $"overrides cleared (were on: {string.Join(", ", cleared)})" : "no climate override was on");
+                }
                 if (body.hour.HasValue)
                 {
                     planet.overrideTime = true;
@@ -566,8 +598,17 @@ namespace CS2MCP
                 {
                     int month = math.clamp(body.month.Value, 1, 12);
                     int daysInMonth = DateTime.DaysInMonth(2025, month);
-                    int day = math.clamp(body.day ?? 15, 1, daysInMonth);
-                    date = ((month - 1) + (day - 1f) / daysInMonth) / 12f;
+                    if (!body.day.HasValue && body.hour.HasValue)
+                    {
+                        // 0.9.41: a CS2 day is one month unit of the climate curves (24 keys per
+                        // month), so the climate's hour of day is the position inside the month.
+                        date = ((month - 1) + math.clamp(body.hour.Value, 0f, 23.99f) / 24f) / 12f;
+                    }
+                    else
+                    {
+                        int day = math.clamp(body.day ?? 15, 1, daysInMonth);
+                        date = ((month - 1) + (day - 1f) / daysInMonth) / 12f;
+                    }
                 }
                 if (date.HasValue)
                 {
@@ -629,9 +670,14 @@ namespace CS2MCP
                     temperature = climate.temperature.overrideState,
                     temperatureValue = climate.temperature.overrideValue,
                     precipitation = climate.precipitation.overrideState,
+                    precipitationValue = climate.precipitation.overrideValue,
                     cloudiness = climate.cloudiness.overrideState,
+                    cloudinessValue = climate.cloudiness.overrideValue,
                     fog = climate.fog.overrideState,
+                    fogValue = climate.fog.overrideValue,
                     aurora = climate.aurora.overrideState,
+                    auroraValue = climate.aurora.overrideValue,
+                    dateValue = climate.currentDate.overrideValue,
                     timeWeatherAnarchy = TimeWeatherAnarchyProfile(),
                     note = "a value whose override is on reads the override everywhere (HUD, sampleAtDate, weather): the editor bottom bar or a mod such as Time and Weather Anarchy sets them",
                 },

@@ -912,3 +912,16 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Action for the owner:** select the mod's "Main" (default) profile, or disable the mod, for season tests.
 
 **`dropped by the game: the course runs inside the existing … segment`:** this is a post-build diagnostic (0.9.12) that explains a course the game discarded. The bridge does not pre-reject overlaps.
+
+## Round 41 (0.9.41): climate overrides cleared
+
+**Theme session's decompile of TimeWeatherAnarchy 88893_17:**
+- **What the mod does:** `TimeAndWeatherControlSystem` writes `overrideValue`/`overrideState` for temperature, precipitation, cloudiness, fog and aurora, plus time, date, latitude and longitude, from the selected profile.
+- **Why it sticks in the editor:** the mod stops updating there (`_isEditor`) but never clears the overrides.
+
+**Bridge changes:**
+- **Editor load:** clears the five weather overrides and logs a warning that names the likely source.
+- **`/map/time`:**
+  - `clearOverrides: true` clears them on demand, plus the date override unless the same call sets a date;
+  - GET lists the value of every override;
+  - `month` + `hour` without `day` sets date = (month − 1 + hour/24)/12, because a CS2 day is one month unit of the climate curves.

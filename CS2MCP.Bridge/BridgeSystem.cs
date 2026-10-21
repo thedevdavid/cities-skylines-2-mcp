@@ -76,6 +76,18 @@ namespace CS2MCP
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
         {
             base.OnGameLoadingComplete(purpose, mode);
+            if (mode == GameMode.Editor)
+            {
+                // 0.9.41: Time and Weather Anarchy applies its profile's climate overrides in the main
+                // menu and stops updating in the editor without clearing them; vanilla sets none
+                // there, so they would pin temperature/precipitation for the whole session.
+                var climate = World.GetOrCreateSystemManaged<ClimateSystem>();
+                var cleared = RequestHandlers.ClearClimateOverrides(climate, includeDate: false);
+                if (cleared.Count > 0)
+                {
+                    Mod.Log.Warn($"editor loaded with climate overrides on ({string.Join(", ", cleared)}), most likely from Time and Weather Anarchy's selected profile; cleared");
+                }
+            }
             m_FrameIndexAtLoad = m_SimulationSystem.frameIndex;
             SimulationHasTickedSinceLoad = false;
         }
