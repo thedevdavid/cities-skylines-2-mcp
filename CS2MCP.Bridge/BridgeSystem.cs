@@ -95,6 +95,13 @@ namespace CS2MCP
             while (m_Pending.TryDequeue(out BridgeRequest request))
             {
                 BridgeResponse response;
+                // 0.9.34 request journal: the last line before a native crash names the bridge call
+                // in flight (A-v8 crashed twice with an empty managed stack).
+                bool journal = request.Method != "GET" || request.Path.StartsWith("/import", StringComparison.Ordinal);
+                if (journal)
+                {
+                    Mod.Log.Info($"request {request.Method} {request.Path} ({request.Body?.Length ?? 0} bytes) frame {m_SimulationSystem.frameIndex}");
+                }
                 try
                 {
                     // A null response means the handler completes the request

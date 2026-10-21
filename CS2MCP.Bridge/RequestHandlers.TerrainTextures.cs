@@ -312,6 +312,18 @@ namespace CS2MCP
                 {
                     AssetDataPath path = AssetImportPipeline.GetPath(null, UncheckedPath.GetLastPathSegmentOrRoot(item.File, out _),
                         $"{texture.name}_{HashUtils.GetHash(texture, item.File)}", DataType.RawTexture, user);
+                    // 0.9.34: the same file gives the same path; never AddAsset over a texture asset
+                    // that is already loaded and in use by the terrain (A-v8 job 2 re-imported all 14).
+                    if (user.Exists(path, out Colossal.IO.AssetDatabase.TextureAsset existing))
+                    {
+                        field.SetValue(settings, (AssetReference<Colossal.IO.AssetDatabase.TextureAsset>)existing.id.guid);
+                        item.Guid = existing.id.guid.ToString();
+                        item.AssetName = existing.name;
+                        item.Error = "reused the existing asset (same file and hash)";
+                        m_ImportedTextureNames[item.Guid] = $"{existing.name} <- {Path.GetFileName(item.File)}";
+                        item.State = "done";
+                        return;
+                    }
                     using (Colossal.IO.AssetDatabase.TextureAsset asset = user.AddAsset(path, texture))
                     {
                         asset.Save();

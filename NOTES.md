@@ -763,3 +763,34 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Option 2:** each 362 m edge is one piece within 192–448.
 - **Option 3:** the upper deck splits into 3 × 325 m fixed spans.
 - **Rerun** both dry runs on the rebuilt terrain.
+
+## Round 34 (0.9.34): A-v8 save failure and native crashes, analysis
+
+**Sequence at save (Player.log 16:55):**
+- **`SerializerSystem` threw** a `NullReferenceException` in `EntityManager.HighestEntityIndex`, at IL_0053, `ChunkIndex.get_Count()`. An archetype lists a chunk whose memory is gone: the ECS chunk store was already corrupt before the save.
+- **That left the MapData stream open.** `MapPanelSystem.SaveMap` passes `mapData.GetWriteStream()` to `SaveGameSystem.RunOnce()`; after the throw it is never closed, and MapData stays at 0 bytes.
+- **The package writer then failed.** `PackageAsset.SaveNoUnload` reopens MapData for reading, which raises the IOException (sharing violation). Continuing then crashed natively.
+- **The 14 terrain textures had already been copied into the save bundle by that point.** So neither their handles nor their size broke the save.
+
+**Texture import, checked against the decompiled game:**
+- **`DefaultTextureImporter.Import`:** it uses `LongFile.Open` inside a `using` block, `Allocator.Persistent` buffers and native `NativeTextures` calls, and no Unity objects. The game itself runs it on pool threads, in `AssetImportPipeline` (`Parallel.ForEach`).
+- **`TextureAsset.SetData(ITexture)`:** it copies the mips into its own buffer.
+- **The bridge sequence is the editor picker's** (`DualImagePickerPopupField.OnSelectFile`), line for line. No stream stays open, and no Unity object is created off the main thread.
+- **The first crash (16:11) was on 0.9.31,** where the import ran synchronously on the main thread.
+
+**Bridge audit (subagent):**
+- **Clean:**
+  - no `DynamicBuffer` is used after a structural change;
+  - there is no ECS access off the main thread;
+  - there are no unsafe writes into game memory.
+- **Hierarchy cache resize:** it completes tracked jobs first, and the game keeps that job's handle in the system's `Dependency`. It runs once per session.
+- **Remaining indirect risks:**
+  - raw `Deleted` from the UI phase, only through `?removeInvalid` on the hierarchy diagnostics endpoint;
+  - direct pillar deletes;
+  - the city `/save` has no busy guard (the editor saves through the UI).
+
+**Root cause: not proven.**
+
+**0.9.34 changes:**
+- The texture job reuses an existing asset at the same path (same file and hash) instead of calling `AddAsset` over a texture that is already loaded and in use. A-v8 job 2 had re-imported all 14 files.
+- CS2MCP.log records every non-GET and every `/import*` request at its start, with the frame number, so the last line before a native crash names the bridge call in flight.
