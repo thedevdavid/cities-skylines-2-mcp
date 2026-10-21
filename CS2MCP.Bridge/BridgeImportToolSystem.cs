@@ -46,6 +46,8 @@ namespace CS2MCP
             public string Id;
             public float2 XZ;
             public float Elevation;
+            /// <summary>0.9.38: heightMode absolute: the requested world y, resolved against the terrain at build time.</summary>
+            public float? AbsoluteY;
             public Entity Entity;
             public bool Given;
             public bool CreatedHere;
@@ -770,9 +772,20 @@ namespace CS2MCP
                     : 0f;
                 return EntityManager.GetComponentData<Node>(node.Entity).m_Position;
             }
-            elevation = node.Elevation;
             var position = new float3(node.XZ.x, 0f, node.XZ.y);
-            position.y = TerrainUtils.SampleHeight(ref heightData, position) + node.Elevation;
+            float ground = TerrainUtils.SampleHeight(ref heightData, position);
+            if (node.AbsoluteY.HasValue)
+            {
+                // 0.9.38: y - ground used to be frozen when the body was parsed; the terrain under
+                // later batches had changed by then (A-v8 interchange 8: +34 m), so the nodes were
+                // built that much too high. Resolve against the terrain of this batch instead.
+                elevation = node.AbsoluteY.Value - ground;
+                node.Elevation = elevation;
+                position.y = node.AbsoluteY.Value;
+                return position;
+            }
+            elevation = node.Elevation;
+            position.y = ground + node.Elevation;
             return position;
         }
 
@@ -1037,6 +1050,9 @@ namespace CS2MCP
         /// node entity attach through CoursePos.m_Entity and keep that node's
         /// height (no FreeHeight); free ends sit at terrain + elevation.
         /// </summary>
+        /// <summary>Above this elevation at both ends an absolute-height edge gets a linear y profile.</summary>
+        private const float kElevatedForLinearY = 2f;
+
         private EdgeDefinition DefineEdge(ImportEdge edge, EntityCommandBuffer commandBuffer, ref TerrainHeightData heightData)
         {
             if (edge.Status != "pending")
@@ -1113,6 +1129,14 @@ namespace CS2MCP
                 }
                 startElevation = 0f;
                 endElevation = 0f;
+            }
+            else if (nodeA.AbsoluteY.HasValue && nodeB.AbsoluteY.HasValue && math.min(startElevation, endElevation) > kElevatedForLinearY)
+            {
+                // 0.9.38: an elevated absolute-height edge keeps the straight y line between its
+                // ends; following the terrain under the control points made curved elevated
+                // pieces sag or hump 5-9 m mid-span (bezier.b/c already carry the lerped y).
+                bezier.a = start;
+                bezier.d = end;
             }
             else
             {
@@ -2002,6 +2026,7 @@ namespace CS2MCP
                 },
                 nodesFirst = new { enabled = m_Job.NodesFirst, refusedPrefabs = refused },
                 snapToSegment = new { requested = snapRequested, snapped, fellBack = snapFellBack, details = snaps },
+                heights = HeightCheck(),
                 batches = new { applied = m_BatchesApplied, rejected = m_BatchesRejected },
                 validation = new
                 {
@@ -2032,6 +2057,101 @@ namespace CS2MCP
                     "Lists are capped at 200; page through every per-edge result with GET /import/report?status=&prefab=&offset=&limit=.",
                 results = m_Job.FullReport ? results : null,
             };
+        }
+
+        /// <summary>
+        /// 0.9.38: requested vs live y per absolute-height edge, at both ends and mid-span
+        /// (the live point nearest in plan to the requested point, over the edge's segments).
+        /// </summary>
+        private object HeightCheck()
+        {
+            int checkedEdges = 0, off = 0;
+            double worst = 0;
+            var list = new List<(double dev, object entry)>();
+            foreach (ImportEdge edge in m_Job.Edges)
+            {
+                ImportNode a = m_Job.Nodes[edge.A];
+                ImportNode b = m_Job.Nodes[edge.B];
+                if (!a.AbsoluteY.HasValue || !b.AbsoluteY.HasValue || edge.Segments.Count == 0)
+                {
+                    continue;
+                }
+                var curves = new List<Bezier4x3>();
+                foreach (Entity segment in edge.Segments)
+                {
+                    if (EntityManager.Exists(segment) && EntityManager.HasComponent<Curve>(segment))
+                    {
+                        curves.Add(EntityManager.GetComponentData<Curve>(segment).m_Bezier);
+                    }
+                }
+                if (curves.Count == 0)
+                {
+                    continue;
+                }
+                float2 midXZ = edge.Control != null && edge.Control.Length == 2
+                    ? MathUtils.Position(new Bezier4x2(a.XZ, edge.Control[0], edge.Control[1], b.XZ), 0.5f)
+                    : edge.Control != null && edge.Control.Length == 1
+                        ? 0.25f * a.XZ + 0.5f * edge.Control[0] + 0.25f * b.XZ
+                        : (a.XZ + b.XZ) * 0.5f;
+                float ya = a.AbsoluteY.Value, yb = b.AbsoluteY.Value, ym = (ya + yb) * 0.5f;
+                float la = LiveY(curves, a.XZ, out float da);
+                float lb = LiveY(curves, b.XZ, out float db);
+                float lm = LiveY(curves, midXZ, out float dm);
+                double dev = math.max(math.abs(la - ya), math.max(math.abs(lb - yb), math.abs(lm - ym)));
+                checkedEdges++;
+                if (dev > 1.0)
+                {
+                    off++;
+                }
+                worst = math.max(worst, dev);
+                list.Add((dev, new
+                {
+                    edge = edge.Id,
+                    prefab = edge.PrefabName,
+                    requested = new[] { Math.Round(ya, 2), Math.Round(ym, 2), Math.Round(yb, 2) },
+                    live = new[] { Math.Round(la, 2), Math.Round(lm, 2), Math.Round(lb, 2) },
+                    maxDeviation = Math.Round(dev, 2),
+                    planDistance = Math.Round(math.max(da, math.max(db, dm)), 2),
+                }));
+            }
+            list.Sort((x, y) => y.dev.CompareTo(x.dev));
+            var worstList = new List<object>();
+            foreach ((double dev, object entry) in list)
+            {
+                if (dev <= 1.0 || worstList.Count >= kReportListCap)
+                {
+                    break;
+                }
+                worstList.Add(entry);
+            }
+            return new
+            {
+                checkedEdges,
+                offMoreThan1m = off,
+                worstDeviation = Math.Round(worst, 2),
+                worst = worstList,
+                note = "absolute-height edges only: requested y at a / mid / b (mid = mean of the ends) vs the live segment y nearest in plan; a ground-level edge follows the terrain mid-span by design",
+            };
+        }
+
+        private static float LiveY(List<Bezier4x3> curves, float2 xz, out float planDistance)
+        {
+            planDistance = float.MaxValue;
+            float y = 0f;
+            foreach (Bezier4x3 curve in curves)
+            {
+                for (int i = 0; i <= 32; i++)
+                {
+                    float3 p = MathUtils.Position(curve, i / 32f);
+                    float d = math.distance(p.xz, xz);
+                    if (d < planDistance)
+                    {
+                        planDistance = d;
+                        y = p.y;
+                    }
+                }
+            }
+            return y;
         }
     }
 }

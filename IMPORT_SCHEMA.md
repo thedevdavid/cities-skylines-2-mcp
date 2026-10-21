@@ -72,7 +72,7 @@ End-to-end length must be 4–1500 m. The game may split an edge into several se
 |---|---|---|
 | `batchSize` | 64 | Definitions per batch (1–512). |
 | `nodesFirst` | true | Create every node as a standalone node entity first, then attach all edges to node entities. Judged per network prefab: if the game rejects or ignores standalone nodes of one prefab (the first one tried fails before any succeeds), that prefab's nodes fall back to free edge ends (see below) and `nodesFirst.refusedPrefabs` says why; other prefabs keep nodes-first. |
-| `heightMode` | `"elevation"` | `"absolute"` derives missing `elevation` from `y`. |
+| `heightMode` | `"elevation"` | `"absolute"` derives a missing `elevation` from `y`. Since 0.9.38 it is resolved against the terrain of the batch that builds the node, not at parse time, and an edge with both ends more than 2 m up keeps a linear y profile mid-span. The report's `heights` block compares the requested and live y at a, mid and b. |
 | `settleFrames` | 1 | Tool frames with `applyMode = None` between creating definitions and applying (1–30). Raise it if large batches are rejected for no stated reason. |
 | `dryRun` | false | Validate ids, references, prefab names and lengths; build nothing. |
 | `bypassValidation` | false | Sets `ToolSystem.ignoreErrors` (the game's own ignore-errors switch, which `GetAllowApply` honours) for the duration of the import and restores the previous value afterwards, also when the import is interrupted. Imports then no longer depend on Anarchy's toggle or the open tool. The report's `validation` block records it. |

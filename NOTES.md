@@ -834,3 +834,27 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 **Bridge:** `/import/network` refuses any edge whose prefab has `AuxiliaryNets`, naming its aux nets; `options.allowAuxiliaryNets` overrides. Together with 0.9.33's aux-only check, the whole family is covered: the BXP Double Deck Highway, Subway and Train, Golden Gate Bridge Subway and Train, and the ExtradosedBridge01 PedsBikes, Public Transport, Subway and Tram.
 
 **Still unexplained:** the 16:55 save failure, the `SerializerSystem` NRE in the chunk store. Candidates are the duplicate "(copy)" prefab ID (fixed in 0.9.35), and leftover damage from the 16:11-type aux-course crash path if a partial aux build happened without killing the process.
+
+## Round 38 (0.9.38): absolute heights resolved at build time
+
+**Converter report (A-v8 interchange 8, fidelity pass):** CS1 segments 14574 and 35648 ask for y 139.8–140.7, but the live segments 64661:3 and 64743:3 sit at y 168.7–178.3. 17897 and 31688 are 13 m off, and curved elevated pieces sag 5–9 m mid-span.
+
+**Cause, from the live graph:**
+- **The nodes themselves were built too high:** 64661:3 ends at y 174–178, with elevation 112.
+- **Elevation was frozen at parse time.** In heightMode absolute, `/import/network` turned y into `elevation = y − ground` when it parsed the body. The node was later built at `ground_at_build + elevation`.
+- **The terrain had changed in between.** The ground under those nodes read ~28 m at parse and ~62 m at build time (+34 m), so the nodes went up by exactly that much.
+- **Mid-span:** `NetUtils.AdjustPosition` put the control points on the terrain under them plus the interpolated elevation. Over uneven ground this gives the sag or hump.
+
+**Fix:**
+- **Nodes keep `AbsoluteY`.** `NodePosition` resolves the elevation against the terrain of the batch being built, so the node lands exactly at the requested y.
+- **Linear y mid-span:** an edge whose two ends are absolute and more than 2 m above the ground keeps the straight y line between its ends (`bezier.b/c` = lerp of the end y). Ground-level edges still follow the terrain.
+
+**Report:** the import report has a new block, `heights`:
+- `checkedEdges`, `offMoreThan1m` and `worstDeviation`;
+- the worst 200, each with requested and live y at a / mid / b.
+
+**Converter bug found on the way (not the cause):**
+- **Doubled control y:** every control point in import-all, roads, rail, power and canals has y ≈ 2 × the node y (ratio 2.000; e.g. `e15_0aa` nodes 125/126, controls 250). bridges-fixed has 0.
+- **No effect today:** the bridge ignores control y (only x/z are used), so this never reached the game. It should be fixed in the converter anyway.
+
+**Test body:** `net-converter/out/x1/test-heights-ic08.json` (14 edges, CS1 segments 14574, 35648, 17897, 31688).

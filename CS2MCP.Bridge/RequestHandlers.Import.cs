@@ -220,6 +220,7 @@ namespace CS2MCP
                 {
                     float ground = TerrainUtils.SampleHeight(ref heightData, new float3(dto.x, 0f, dto.z));
                     node.Elevation = dto.y.Value - ground;
+                    node.AbsoluteY = dto.y.Value;
                     hasElevation = true;
                 }
                 if (dto.entity != null)
