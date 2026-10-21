@@ -57,7 +57,7 @@ namespace CS2MCP
         private void EnsureDefaultTool(BridgeRequest request)
         {
             bool drives = request.Method == "POST" && (request.Path.StartsWith("/import", StringComparison.Ordinal)
-                || request.Path == "/map/load"
+                || request.Path == "/map/load" || request.Path == "/build/demolish-area"
                 || (request.Path == "/map/time" && (request.Body ?? "").IndexOf("settle", StringComparison.OrdinalIgnoreCase) >= 0));
             if (!drives)
             {
@@ -263,6 +263,8 @@ namespace CS2MCP
                     return HierarchyDiagnostics(request);
                 case "/map/checklist":
                     return MapChecklist();
+                case "/build/demolish-area":
+                    return DemolishArea(request);
                 case "/map/load":
                 case "/map/load/status":
                     return MapLoad(request);

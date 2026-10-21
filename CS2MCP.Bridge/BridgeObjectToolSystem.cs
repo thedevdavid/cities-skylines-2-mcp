@@ -259,6 +259,24 @@ namespace CS2MCP
             return true;
         }
 
+        /// <summary>
+        /// 0.9.49: delete arbitrary top-level objects/areas (POST /build/demolish-area) through the
+        /// same bulldoze batches as undo. The label is reported as the import id.
+        /// </summary>
+        public bool TryStartDelete(List<Entity> entities, string label, BridgeRequest request, out string error)
+        {
+            error = null;
+            if (m_Stage != Stage.Idle)
+            {
+                error = "an object import or undo is running";
+                return false;
+            }
+            var target = new ObjectRecord { Id = label, Name = label };
+            target.Entities.AddRange(entities);
+            StartDelete(target, request);
+            return true;
+        }
+
         /// <summary>Undo by import id or name; the newest import when both are empty.</summary>
         public bool TryStartUndo(string idOrName, BridgeRequest request, out string error)
         {
@@ -284,6 +302,12 @@ namespace CS2MCP
                     : $"no object import with id or name '{idOrName}'";
                 return false;
             }
+            StartDelete(target, request);
+            return true;
+        }
+
+        private void StartDelete(ObjectRecord target, BridgeRequest request)
+        {
             m_DeleteEntities = new List<Entity>();
             foreach (Entity entity in target.Entities)
             {
@@ -309,7 +333,6 @@ namespace CS2MCP
             }
             m_PendingRequest = request;
             Activate();
-            return true;
         }
 
         private void Activate()

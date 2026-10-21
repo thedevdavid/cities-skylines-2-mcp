@@ -463,3 +463,22 @@ Other parameters and output:
 - **Owned segments:** `owned=true` includes them.
 
 POST body: `{paths: [...], radius, cell, area, owned, limit}`. Segments the game merged or re-split still count as present, because midpoints are tested against whole curves.
+
+## Removing objects by area (`POST /build/demolish-area`, 0.9.49)
+
+```json
+POST /build/demolish-area
+{ "polygon": [[x, z], ...] | "bounds": { "minX": -6468, "minZ": 668, "maxX": -6228, "maxZ": 1078 },
+  "prefabs": ["BasePlateConcrete16", "Pillar1x8"],
+  "kinds": ["object", "tree", "surface"],
+  "dryRun": true }
+```
+
+- **What it selects:** top-level objects (no Owner) whose position lies inside the area, and surfaces whose node centroid does.
+- **Kinds:** `object` (props and static objects), `tree`, `surface` and `building`. The default is object, tree and surface. Nets are never touched; buildings only when `kinds` asks for them.
+- **`prefabs`:** optional; limits the selection to these names (case-insensitive).
+- **Dry run:** `dryRun: true` answers the counts (`total`, `byKind`, `perPrefab`) without changing anything.
+- **Real run:** the same bulldoze batches as `/import/objects/undo`, and the same report.
+- **Size limit:** areas above 4 km² need `force: true`.
+- **Logged:** in the request journal.
+- **Use:** redo one layer on a reloaded map, where undo records are gone (they live in memory only).
