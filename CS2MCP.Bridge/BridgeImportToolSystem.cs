@@ -48,6 +48,8 @@ namespace CS2MCP
             public float Elevation;
             /// <summary>0.9.38: heightMode absolute: the requested world y, resolved against the terrain at build time.</summary>
             public float? AbsoluteY;
+            /// <summary>0.9.40: no elevation reproduces AbsoluteY under the game's FreeHeight rule; keep the given y.</summary>
+            public bool KeepY;
             public Entity Entity;
             public bool Given;
             public bool CreatedHere;
@@ -197,6 +199,8 @@ namespace CS2MCP
         private TerrainSystem m_Terrain;
         private EntityArchetype m_WaterSourceArchetype;
         private WaterWork m_WaterWork;
+        private WaterSurfaceData<SurfaceWater> m_WaterData;
+        private bool m_HaveWater;
         private EntityQuery m_NodeQuery;
         private EntityQuery m_EdgeQuery;
         private EntityQuery m_IconQuery;
@@ -615,6 +619,16 @@ namespace CS2MCP
                 TakeSnapshot();
                 EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
                 TerrainHeightData heightData = m_Terrain.GetHeightData();
+                m_HaveWater = false;
+                try
+                {
+                    m_WaterData = m_WaterSystem.GetSurfaceData(out JobHandle waterDeps);
+                    waterDeps.Complete();
+                    m_HaveWater = true;
+                }
+                catch (Exception)
+                {
+                }
                 m_CurrentDefined = 0;
                 switch (m_Current.Kind)
                 {
@@ -765,7 +779,7 @@ namespace CS2MCP
 
         // ---- definitions ----
 
-        private float3 NodePosition(ImportNode node, ref TerrainHeightData heightData, out float elevation)
+        private float3 NodePosition(ImportNode node, ref TerrainHeightData heightData, out float elevation, Entity edgePrefab = default)
         {
             if (node.Entity != Entity.Null && EntityManager.Exists(node.Entity) && EntityManager.HasComponent<Node>(node.Entity))
             {
@@ -778,12 +792,39 @@ namespace CS2MCP
             float ground = TerrainUtils.SampleHeight(ref heightData, position);
             if (node.AbsoluteY.HasValue)
             {
-                // 0.9.38: y - ground used to be frozen when the body was parsed; the terrain under
-                // later batches had changed by then (A-v8 interchange 8: +34 m), so the nodes were
-                // built that much too high. Resolve against the terrain of this batch instead.
-                elevation = node.AbsoluteY.Value - ground;
+                // 0.9.40: a FreeHeight course end is placed by CourseSplitSystem.InitializeCoursePos
+                // at max(terrain, water surface + 2 x elevation limit) + elevation (terrain only when
+                // the elevation is below -1). An elevation measured from the terrain alone put every
+                // absolute node over water that much too high: A-v8/A-v9 interchange 8 stood 34-38 m
+                // above its CS1 y. Measure from the same base, so the end lands on AbsoluteY.
+                float y = node.AbsoluteY.Value;
+                float baseHeight = ground;
+                if (m_HaveWater)
+                {
+                    WaterUtils.SampleHeight(ref m_WaterData, ref heightData, position, out float terrainHeight, out float waterHeight, out float depth);
+                    float limit = edgePrefab != Entity.Null && EntityManager.HasComponent<NetGeometryData>(edgePrefab)
+                        ? EntityManager.GetComponentData<NetGeometryData>(edgePrefab).m_ElevationLimit
+                        : 4f;
+                    if (depth >= 0.2f)
+                    {
+                        baseHeight = math.max(terrainHeight, waterHeight + limit * 2f);
+                    }
+                    ground = terrainHeight;
+                }
+                elevation = y - baseHeight;
+                node.KeepY = false;
+                if (elevation < -1f)
+                {
+                    // Below -1 the game measures from the terrain alone.
+                    elevation = y - ground;
+                    if (elevation >= -1f)
+                    {
+                        // Between the two bases: no elevation gives y; build at y without FreeHeight.
+                        node.KeepY = true;
+                    }
+                }
                 node.Elevation = elevation;
-                position.y = node.AbsoluteY.Value;
+                position.y = y;
                 return position;
             }
             elevation = node.Elevation;
@@ -793,10 +834,10 @@ namespace CS2MCP
 
         private void DefineNode(ImportNode node, EntityCommandBuffer commandBuffer, ref TerrainHeightData heightData)
         {
-            float3 position = NodePosition(node, ref heightData, out float elevation);
+            float3 position = NodePosition(node, ref heightData, out float elevation, node.CreatePrefab);
             var tangent = new float3(node.Direction.x, 0f, node.Direction.y);
             CoursePosFlags flags = CoursePosFlags.IsFirst | CoursePosFlags.IsLast | CoursePosFlags.IsLeft | CoursePosFlags.IsRight;
-            if (elevation != 0f)
+            if (elevation != 0f && !node.KeepY)
             {
                 flags |= CoursePosFlags.FreeHeight;
             }
@@ -871,7 +912,7 @@ namespace CS2MCP
             }
             if (node.Entity != Entity.Null)
             {
-                float3 position = NodePosition(node, ref heightData, out float elevation);
+                float3 position = NodePosition(node, ref heightData, out float elevation, edgePrefab);
                 return new EndInfo { Entity = node.Entity, Position = position, Elevation = elevation };
             }
             bool snapFellBack = false;
@@ -914,12 +955,12 @@ namespace CS2MCP
                     Entity endNode = t < 0.02f ? ends.m_Start : ends.m_End;
                     node.Entity = endNode;
                     node.Absorbed = false;
-                    float3 nodePosition = NodePosition(node, ref heightData, out float nodeElevation);
+                    float3 nodePosition = NodePosition(node, ref heightData, out float nodeElevation, edgePrefab);
                     return new EndInfo { Entity = endNode, Position = nodePosition, Elevation = nodeElevation };
                 }
                 return new EndInfo { Entity = segment, Split = t, Position = MathUtils.Position(curve, t), Elevation = elevation };
             }
-            float3 free = NodePosition(node, ref heightData, out float freeElevation);
+            float3 free = NodePosition(node, ref heightData, out float freeElevation, edgePrefab);
             return new EndInfo { Position = free, Elevation = freeElevation, SnapFellBack = snapFellBack };
         }
 
@@ -1178,11 +1219,11 @@ namespace CS2MCP
                 m_Flags = CoursePosFlags.IsLast | CoursePosFlags.IsLeft | CoursePosFlags.IsRight,
             };
             // Never FreeHeight on an attached end (it breaks the joined node's height).
-            if (!startAttached && startElevation != 0f)
+            if (!startAttached && startElevation != 0f && !nodeA.KeepY)
             {
                 course.m_StartPosition.m_Flags |= CoursePosFlags.FreeHeight;
             }
-            if (!endAttached && endElevation != 0f)
+            if (!endAttached && endElevation != 0f && !nodeB.KeepY)
             {
                 course.m_EndPosition.m_Flags |= CoursePosFlags.FreeHeight;
             }

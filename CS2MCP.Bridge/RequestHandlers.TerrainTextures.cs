@@ -396,6 +396,63 @@ namespace CS2MCP
         }
 
 
+        private object CurveAtDate(ClimateSystem climate)
+        {
+            if (climate.currentClimate == Unity.Entities.Entity.Null)
+            {
+                return null;
+            }
+            var prefab = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>().GetPrefab<Game.Prefabs.Climate.ClimatePrefab>(climate.currentClimate);
+            return SampleObject(climate.SampleClimate(prefab, (float)climate.currentDate));
+        }
+
+        /// <summary>
+        /// 0.9.40: Time and Weather Anarchy (PDX 88893) re-applies its selected profile's custom
+        /// temperature / precipitation / date every frame; A-v9's season test read its "desert"
+        /// profile (31 °C, day 193) on every date.
+        /// </summary>
+        private static object TimeWeatherAnarchyProfile()
+        {
+            bool loaded = false;
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.GetName().Name.IndexOf("TimeWeatherAnarchy", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    loaded = true;
+                    break;
+                }
+            }
+            if (!loaded)
+            {
+                return null;
+            }
+            try
+            {
+                string root = Path.Combine(UnityEngine.Application.persistentDataPath, "ModsSettings");
+                var settings = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(Path.Combine(root, "TimeWeatherAnarchy.coc")).Substring(
+                    File.ReadAllText(Path.Combine(root, "TimeWeatherAnarchy.coc")).IndexOf('{')));
+                string id = (string)settings["SelectedProfile"];
+                string profilePath = Path.Combine(root, "TimeWeatherAnarchy", "Profiles", id + ".json");
+                var profile = File.Exists(profilePath) ? Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(profilePath)) : null;
+                return new
+                {
+                    loaded = true,
+                    selectedProfile = (string)profile?["Name"] ?? id,
+                    customTemperature = (bool?)profile?["EnableCustomTemperature"],
+                    temperature = (float?)profile?["Temperature"],
+                    customPrecipitation = (bool?)profile?["EnableCustomPrecipitation"],
+                    timeOption = (int?)profile?["TimeOption"],
+                    weatherOption = (int?)profile?["WeatherOption"],
+                    dayOfTheYear = (int?)profile?["DayOfTheYear"],
+                    note = "settings file as saved; select the 'Main' (default) profile in the mod's options to stop its overrides",
+                };
+            }
+            catch (Exception e)
+            {
+                return new { loaded = true, error = e.Message };
+            }
+        }
+
         private static object SampleObject(ClimateSystem.ClimateSample c)
         {
             return new
@@ -565,6 +622,19 @@ namespace CS2MCP
                     classification = climate.classification.ToString(),
                 },
                 sampleAtDate = SampleObject(climate.SampleClimate((float)climate.currentDate)),
+                curveAtDate = CurveAtDate(climate),
+                overrides = new
+                {
+                    date = climate.currentDate.overrideState,
+                    temperature = climate.temperature.overrideState,
+                    temperatureValue = climate.temperature.overrideValue,
+                    precipitation = climate.precipitation.overrideState,
+                    cloudiness = climate.cloudiness.overrideState,
+                    fog = climate.fog.overrideState,
+                    aurora = climate.aurora.overrideState,
+                    timeWeatherAnarchy = TimeWeatherAnarchyProfile(),
+                    note = "a value whose override is on reads the override everywhere (HUD, sampleAtDate, weather): the editor bottom bar or a mod such as Time and Weather Anarchy sets them",
+                },
                 climate = ClimateMonthly(),
                 note = "editor preview (bottom bar): not saved with the map. live values only update while the clock runs (ClimateSystem runs in EditorSimulation steps); sampleAtDate is computed now from the current climate curves (overrides applied); use settle:<seconds> to let weather and snow catch up",
             });

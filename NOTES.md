@@ -888,3 +888,27 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **When it reverts:** a later net-tool edit of such a segment recomputes the elevation from the terrain.
 
 **For the converter:** the alternative is to lift the ramps to ≥ 8.05 m above the terrain at every point, with no flag. That changes heights and is not what CS1 had.
+
+## Round 40 (0.9.40): absolute heights over water; season readout
+
+**Interchange 8, still too high in A-v9:** heights were identical to A-v8 to the centimetre (e.g. 174.06 / 178.00), so round 38's "terrain changed between parse and build" explanation was wrong.
+- **Real cause:** `CourseSplitSystem.InitializeCoursePos` places a `FreeHeight` course end at `max(terrain, water surface + 2 × ElevationLimit) + elevation`. Below an elevation of −1 it uses the terrain alone. Water counts where its depth is ≥ 0.2 m, and 2 × the limit is 8 m for roads.
+- **How the bridge triggered it:** it sets `FreeHeight` on every unattached end with a nonzero elevation (standalone nodes from nodesFirst, and free edge ends), but measured the elevation from the terrain only. Over water each node therefore rose by water surface + 8 − bed height. That accounts for the 34–38 m.
+- **Fix:**
+  - For absolute nodes, the elevation is measured from the same base as `InitializeCoursePos`: water surface data is read once per batch and `WaterUtils.SampleHeight` gives the terrain, water and depth.
+  - Between the two bases (no elevation reproduces y), the end is built without `FreeHeight` at the given y (`KeepY`).
+  - This applies to `DefineNode` and to the edge ends.
+  - Round 38's per-batch resolution and linear mid-span y stay.
+- **Verify:** `report.heights` on the next import.
+
+**Season test 31 °C on every date:**
+- **What `/map/time` read:** `sampleAtDate` applies the climate overrides, and `temperature.overrideState` was on.
+- **Who set it:** Time and Weather Anarchy (PDX 88893) is loaded with the selected profile "desert" (`ModsSettings/TimeWeatherAnarchy`). That profile has a custom temperature of 31, custom precipitation of 0, TimeOption 3, WeatherOption 2 and day of the year 193. The mod re-applies this every frame, so the season stays summer.
+- **Curve rebuild:** `climateEdit` already rebuilds the copy's curves (`AfterLookChange`: `EnsureSeasonsOrder` + `RebuildCurves`).
+- **`/map/time` now also returns:**
+  - `curveAtDate`: the raw curve at the date, without overrides;
+  - `overrides`: the state of date, temperature (with its value), precipitation, cloudiness, fog and aurora;
+  - `timeWeatherAnarchy`: loaded or not, the selected profile and its custom settings.
+- **Action for the owner:** select the mod's "Main" (default) profile, or disable the mod, for season tests.
+
+**`dropped by the game: the course runs inside the existing … segment`:** this is a post-build diagnostic (0.9.12) that explains a course the game discarded. The bridge does not pre-reject overlaps.
