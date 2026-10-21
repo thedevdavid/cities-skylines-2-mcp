@@ -794,3 +794,24 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 **0.9.34 changes:**
 - The texture job reuses an existing asset at the same path (same file and hash) instead of calling `AddAsset` over a texture that is already loaded and in use. A-v8 job 2 had re-imported all 14 files.
 - CS2MCP.log records every non-GET and every `/import*` request at its start, with the frame number, so the last line before a native crash names the bridge call in flight.
+
+## Round 35 (0.9.35): idempotent look edits
+
+**Owner data:**
+- **A8a/A8b:** a texture job followed by a save works on a loaded map: A8b was 159.8 MB, with no error.
+- **The failure needs this sequence in one session:**
+  1. a settings swap and texture job 1;
+  2. the look step (vanilla terrain settings selected again);
+  3. a second settings swap and texture job 2;
+  4. the save.
+
+**Mechanism found:** in `PrefabSystem.AddPrefab`, a second `Clone()` of the vanilla terrain settings gets the same name, "DefaultTerrainRenderSettings (copy)", and its own prefab entity. But `m_PrefabIndices` (by PrefabID) keeps pointing to the first copy, which triggers the "Duplicate prefab ID" warning.
+- The terrain then uses copy 2.
+- The save's prefab references and every name lookup resolve to copy 1, along with its own asset references.
+- So two prefab entities share one ID at save. This doesn't explain the corrupted chunk store, but it is the one state that differs between the failing session and A8b.
+
+**Fix:** `EditLook` first looks up an editable "<name> (copy)" of the same type by PrefabID and edits that instead of cloning again. This covers `/map/settings`, the texture job and climate/water/terrain.
+
+**No crash dumps:** neither `%LOCALAPPDATA%\Temp\Colossal Order\Cities Skylines II\Crashes`, LocalLow `Crashes`, nor `%LOCALAPPDATA%\CrashDumps` has a Cities2 dump.
+
+**Owner note:** three saves under the name of the crashed 16:55 save were silently dropped. A bridge `/map/save` that reports the real outcome is a candidate follow-up.

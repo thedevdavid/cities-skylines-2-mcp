@@ -271,6 +271,25 @@ namespace CS2MCP
             if (current.isReadOnly || (current.asset != null && current.asset.isPersistent))
             {
                 PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+                // 0.9.35: reuse an editable "<name> (copy)" from earlier in the session. A second
+                // Clone + AddPrefab gets its own entity, but PrefabSystem keeps the PrefabID index on
+                // the first one ("Duplicate prefab ID"), so lookups and the save see a stale copy.
+                if (prefabSystem.TryGetPrefab(new PrefabID(current.GetType().Name, current.name + " (copy)"), out PrefabBase earlier)
+                    && earlier != null && earlier.GetType() == current.GetType()
+                    && !earlier.isReadOnly && !(earlier.asset != null && earlier.asset.isPersistent)
+                    && prefabSystem.TryGetEntity(earlier, out Entity earlierEntity))
+                {
+                    SetCurrentLookEntity(type, earlierEntity);
+                    applied.Add($"{label}: '{current.name}' is read-only; editing the existing copy '{earlier.name}' from earlier in this session");
+                    current = earlier;
+                    int count = applied.Count;
+                    AssignFields(current, edits, label, applied, problems);
+                    if (applied.Count > count)
+                    {
+                        AfterLookChange(current);
+                    }
+                    return;
+                }
                 PrefabBase clone = current.Clone();
                 prefabSystem.AddPrefab(clone);
                 if (!prefabSystem.TryGetEntity(clone, out Entity cloneEntity))
