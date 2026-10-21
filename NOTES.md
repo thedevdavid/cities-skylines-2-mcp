@@ -1018,3 +1018,30 @@ Each applied batch therefore cost time proportional to every object on the map, 
 **Not resolved:** the running game had the older bridge, so `GET /debug/editor-ui` (new) could not be called in that state.
 
 **New:** `POST /map/load?name=` lets the runner reload without the panel.
+
+## Round 47 (0.9.47): fourth native crash (A-v11 season test)
+
+**Sequence:** saved map, 0.9.44.
+1. `/map/time` with date, settle 120 s, speed 3.
+2. "settle finished, simulation paused".
+3. 1.5 s later, `/map/time` (39 B) and `/camera/set`.
+4. Native crash with an empty managed stack.
+
+Player.log shows only UI "Transitioned property…" warnings before it, and no dump was written. The same script had passed twice on A9c (0.9.41/42).
+
+**Checked:**
+- **Raster paint:** releases everything it creates.
+  - Masks are `Object.Destroy`ed after each dispatch, and their CPU copy is now dropped at upload (`Apply(false, true)`).
+  - Calibration snapshots are released; the brush read-back uses a temporary RT that is released.
+  - Only the game's own command buffer is used.
+  - The undo snapshots (2 RTs, ~34 MB per import) are capped at 3 imports, as since 0.9.29.
+- **`SnowSystem`:** fixed 1024² textures and dispatches, nothing per object. Precipitation only changes values, not sizes.
+- **`/map/time` handlers:** run on the main thread in BridgeSystem's update, between frames, so no override changes mid-job from our side.
+
+**Changes:**
+- **`/map/time` POST refused while a settle is still running** (409 with `settleUntil`).
+- **Heartbeat in CS2MCP.log every 5 s:** frame, sim speed, active tool, last request, and memory (managed, Unity allocated/reserved, graphics driver). The last lines before a crash show state and memory trend; the request journal of 0.9.34 is still there.
+
+**Crash dumps (owner action, a system setting):** Windows Error Reporting can write full dumps for Cities2.exe. Run, as administrator:
+`reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Cities2.exe" /v DumpType /t REG_DWORD /d 2 /f`
+plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This only works if Mono's handler lets the crash reach WER; the `Native Crash Reporting` block suggests it may not.

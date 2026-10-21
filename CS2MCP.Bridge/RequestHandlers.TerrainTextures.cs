@@ -568,6 +568,15 @@ namespace CS2MCP
             PlanetarySystem planet = World.GetOrCreateSystemManaged<PlanetarySystem>();
             ClimateSystem climate = World.GetOrCreateSystemManaged<ClimateSystem>();
             var applied = new List<string>();
+            if (request.Method == "POST" && BridgeSystem.Instance.AutoPauseAt.HasValue)
+            {
+                // 0.9.47: one thing at a time; the previous settle is still running the clock.
+                return BridgeResponse.Json(new
+                {
+                    error = "a settle is still running; wait until it ends (settleUntil) and the clock is paused",
+                    settleUntil = BridgeSystem.Instance.AutoPauseAt.Value.ToString("HH:mm:ss"),
+                }, 409);
+            }
             if (request.Method == "POST")
             {
                 MapTimeDto body;

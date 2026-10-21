@@ -41,6 +41,38 @@ namespace CS2MCP
             AutoPauseTargetFrame = targetFrame;
         }
 
+        /// <summary>0.9.47: the last request handled, for the heartbeat line.</summary>
+        public string LastRequest { get; private set; }
+
+        private DateTime m_NextHeartbeat;
+
+        /// <summary>
+        /// 0.9.47: every 5 s one INFO line in CS2MCP.log with the frame, simulation speed, active tool,
+        /// last request and memory (managed, Unity total allocated, graphics driver). A native crash
+        /// leaves no stack (A-v8 x2, A-v10, A-v11); the last heartbeats show the state and any
+        /// memory growth just before it.
+        /// </summary>
+        private void Heartbeat()
+        {
+            DateTime now = DateTime.Now;
+            if (now < m_NextHeartbeat)
+            {
+                return;
+            }
+            m_NextHeartbeat = now.AddSeconds(5);
+            try
+            {
+                var tools = World.GetExistingSystemManaged<Game.Tools.ToolSystem>();
+                Mod.Log.Info($"heartbeat frame {m_SimulationSystem.frameIndex} speed {m_SimulationSystem.selectedSpeed} " +
+                    $"tool {tools?.activeTool?.toolID ?? "-"} last {LastRequest ?? "-"} " +
+                    $"managed {GC.GetTotalMemory(false) >> 20} MB, unity {UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() >> 20} MB, " +
+                    $"reserved {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() >> 20} MB, gfx {UnityEngine.Profiling.Profiler.GetAllocatedMemoryForGraphicsDriver() >> 20} MB");
+            }
+            catch (Exception)
+            {
+            }
+        }
+
         /// <summary>0.9.37: wall-clock auto-pause for /map/time settle (null = disabled).</summary>
         public DateTime? AutoPauseAt { get; set; }
 
@@ -114,6 +146,7 @@ namespace CS2MCP
                 AutoPauseAt = null;
                 Mod.Log.Info("map/time settle finished, simulation paused");
             }
+            Heartbeat();
             m_Handlers.EnsureHierarchyCacheCapacity();
             m_Handlers.PumpTerrainTextureJob();
             while (m_Pending.TryDequeue(out BridgeRequest request))
@@ -122,6 +155,7 @@ namespace CS2MCP
                 // 0.9.34 request journal: the last line before a native crash names the bridge call
                 // in flight (A-v8 crashed twice with an empty managed stack).
                 bool journal = request.Method != "GET" || request.Path.StartsWith("/import", StringComparison.Ordinal);
+                LastRequest = $"{DateTime.Now:HH:mm:ss} {request.Method} {request.Path}";
                 if (journal)
                 {
                     Mod.Log.Info($"request {request.Method} {request.Path} ({request.Body?.Length ?? 0} bytes) frame {m_SimulationSystem.frameIndex}");

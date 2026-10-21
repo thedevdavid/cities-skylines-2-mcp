@@ -177,7 +177,8 @@ namespace CS2MCP
                     data[i + 3] = v;
                 }
             }
-            texture.Apply(false, false);
+            // makeNoLongerReadable: the CPU copy (64 MB at 4096²) is freed at upload.
+            texture.Apply(false, true);
             return texture;
         }
 
@@ -233,7 +234,8 @@ namespace CS2MCP
                 name = "CS2MCP paint mask",
             };
             texture.SetPixelData(pixels, 0);
-            texture.Apply(false, false);
+            // makeNoLongerReadable: the CPU copy (64 MB at 4096²) is freed at upload.
+            texture.Apply(false, true);
             return texture;
         }
 
