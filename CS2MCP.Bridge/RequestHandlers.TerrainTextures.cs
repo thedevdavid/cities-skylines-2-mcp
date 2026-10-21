@@ -86,7 +86,7 @@ namespace CS2MCP
         /// </summary>
         private BridgeResponse TerrainTextures(BridgeRequest request)
         {
-            if (!TryGetCityOrEditor(out _, out BridgeResponse error))
+            if (!TryGetCityOrEditor(out bool texturesEditor, out BridgeResponse error))
             {
                 return error;
             }
@@ -104,6 +104,11 @@ namespace CS2MCP
                 if (body?.textures == null || body.textures.Count == 0)
                 {
                     return BridgeResponse.Error(400, "POST {textures:[{slot: Rock|Dirt|Grass|Extra1..Extra4, diffuse: <image path>, normal: <image path>}], worker?: true}");
+                }
+                BridgeResponse refused = TerrainRenderGuard(request, texturesEditor);
+                if (refused != null)
+                {
+                    return refused;
                 }
                 if (m_TextureJob != null && !m_TextureJob.Done)
                 {

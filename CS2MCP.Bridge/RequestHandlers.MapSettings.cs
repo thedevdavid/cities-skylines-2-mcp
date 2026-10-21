@@ -106,6 +106,21 @@ namespace CS2MCP
             return string.Join(", ", names);
         }
 
+/// <summary>0.9.43: terrain render edits are refused on a map that was never saved (see MapEverSaved).</summary>
+        private BridgeResponse TerrainRenderGuard(BridgeRequest request, bool editor)
+        {
+            if (!editor || SavedSinceLoad() || (request.TryGetBool("force", out bool force) && force))
+            {
+                return null;
+            }
+            return BridgeResponse.Json(new
+            {
+                error = "terrain render edits (terrainEdit, terrainRenderSettings, terrain textures) are refused on a map that has never been saved",
+                why = "A-v8 and A-v10 crashed natively right after terrain-cs1 on fresh, unsaved maps; on loaded saves the same posts never crashed",
+                fix = "POST /map/save?name=<name> first (or load a saved map), then repeat; ?force=true overrides",
+            }, 409);
+        }
+
         private BridgeResponse MapSettings(BridgeRequest request)
         {
             if (!TryGetCityOrEditor(out bool editor, out BridgeResponse error))
@@ -124,6 +139,14 @@ namespace CS2MCP
                 catch (Exception e)
                 {
                     return BridgeResponse.Error(400, $"invalid JSON: {e.Message}");
+                }
+                if (body != null && (body.terrainEdit != null || !string.IsNullOrEmpty(body.terrainRenderSettings)))
+                {
+                    BridgeResponse refused = TerrainRenderGuard(request, editor);
+                    if (refused != null)
+                    {
+                        return refused;
+                    }
                 }
                 ApplyMapSettings(body ?? new MapSettingsDto(), editor, applied, problems);
                 if (problems.Count > 0 && applied.Count == 0)

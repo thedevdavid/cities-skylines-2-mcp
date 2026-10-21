@@ -935,3 +935,25 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - **Placeholders:** they pick a random variant.
 
 **`/prefabs/info`:** now reports `geometry.pillar` (type, offsetRange), `geometry.stack` (direction, first/middle/last bounds) and `geometry.placeholder` (variant count).
+
+## Round 43 (0.9.43): A-v10 native crash after the look step, `/map/save`
+
+**Crash:** a fresh map. The last bridge requests (CS2MCP.log 05:44:16) were four `/map/settings` posts within 220 ms: lat/long/theme, climate.json, water.json, and terrain-cs1.json (editable copy, legacy format, tiling). Player.log then shows "GPU instance buffer size changing to: 80 MB" and the native crash at 05:44:26, with an empty managed stack. No dump.
+
+**What the terrain post does natively (decompiled `TerrainMaterialSystem`):**
+- **The setter swaps the live textures:** `currentTerrainRenderSettings` calls `ApplyRenderSettings()`. That starts with `ReleaseTextures()`, which `Unload()`s every terrain `TextureAsset` it loaded. It then loads the new set synchronously (`TextureAsset.Load(mipBias)`) and binds it with `Shader.SetGlobalTexture`.
+- **Twice per post:** the bridge's `AfterLookChange` calls `ApplyRenderSettings()` again in the same frame.
+- **Legacy format:** it switches the normal-map fallback (`Texture2D.normalTexture` vs the system's) and the `_TerrainLegacy*` shader globals.
+- **Hypothesis:** freeing and reloading GPU textures that the frame in flight (and the VT/terrain passes) still reference, on a map whose terrain and materials were just built.
+- **Not proven:** there is no dump, and A-v9 survived the same posts on a fresh map.
+
+**Duplicate prefab IDs:**
+- **Cause:** the "(copy)" reuse of 0.9.35 only finds an editable copy. A copy from a map loaded earlier in the game session is asset-backed, so the bridge cloned again under the same name and produced a duplicate ID.
+- **Fix:** clones now get a free name ("… (copy 2)" etc.).
+
+**Changes:**
+- **`POST /map/save?name=…[&overwrite=true]`:** the editor's own save path with the real outcome in `/map/save/status`. Existing names get a 409 unless overwrite is set. See MAP_SETTINGS.md.
+- **Never-saved maps:** terrain render edits and terrain textures are refused there (409, `?force=true`).
+- **Safe sequence:** build → `/map/save` → look posts, one per request, after the previous answer → save.
+
+**"CSS parsing error … 5.000000e-02":** not the bridge's. CS2MCP has no UI module or CSS. Another mod's UI writes a float in exponent form.

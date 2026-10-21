@@ -237,3 +237,15 @@ It is a preview only and is not saved with the map. The season look follows the 
   - **With `day`:** day-of-month positions the date within the month, as before.
   - **Without `day`:** the date is (month − 1 + hour/24)/12, because a CS2 day is one month unit of the climate curves. So `hour` sets both the sun and the climate's hour of day.
   - **`date`:** sets the curve position directly.
+
+## Saving the editor map (`POST /map/save?name=…[&overwrite=true]`, 0.9.43)
+
+- **What it does:** runs the editor's own save path (`MapPanelSystem.SaveMap` on the game's `SaveLoadGame` task queue, as the Save Map panel does) and answers `202` at once.
+- **Status:** `GET /map/save/status` reports `state` (queued, saving, written, done, failed), `error`, the metadata guid, the package path under `Maps` with its size in bytes, and `seconds`. `done` means the save callback ran and a non-empty package exists. A save that throws, such as A-v8's MapData sharing violation, comes back as `failed` with the exception.
+- **Names:** a name that already exists answers 409 unless `overwrite=true`. In that case the bridge follows the panel's overwrite branch.
+- **`mapEverSaved`:** true when the map came from a save, was saved through `/map/save`, or was saved in the editor UI since it loaded. The UI case is detected through `MapPanelSystem`'s source guid changing.
+
+**Terrain render edits are refused on never-saved maps (0.9.43):**
+- **What is refused:** `terrainEdit` or `terrainRenderSettings` in `/map/settings`, and `POST /map/terrain-textures`, on a map whose `mapEverSaved` is false. They answer 409 unless `?force=true`.
+- **Why:** the A-v8 and A-v10 native crashes both followed these posts on fresh maps; loaded saves never crashed.
+- **Sequence for the runner:** build, then `POST /map/save?name=…` and wait for `done`, then the look posts, then save again.

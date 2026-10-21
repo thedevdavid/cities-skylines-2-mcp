@@ -76,6 +76,8 @@ namespace CS2MCP
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
         {
             base.OnGameLoadingComplete(purpose, mode);
+            RequestHandlers.MapEverSaved = purpose != Purpose.NewMap && purpose != Purpose.NewGame;
+            RequestHandlers.SourceGuidAtLoad = RequestHandlers.EditorSourceGuid(World);
             if (mode == GameMode.Editor)
             {
                 // 0.9.41: Time and Weather Anarchy applies its profile's climate overrides in the main

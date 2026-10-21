@@ -235,6 +235,9 @@ namespace CS2MCP
                     return HierarchyDiagnostics(request);
                 case "/map/checklist":
                     return MapChecklist();
+                case "/map/save":
+                case "/map/save/status":
+                    return MapSave(request);
                 case "/map/settings":
                     return MapSettings(request);
                 case "/entity/subnets":

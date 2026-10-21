@@ -290,7 +290,14 @@ namespace CS2MCP
                     }
                     return;
                 }
-                PrefabBase clone = current.Clone();
+                // 0.9.43: never reuse a taken PrefabID. A "(copy)" that exists but is not editable
+                // (e.g. from a map loaded earlier in this game session) would give a duplicate ID.
+                string cloneName = current.name + " (copy)";
+                for (int n = 2; prefabSystem.TryGetPrefab(new PrefabID(current.GetType().Name, cloneName), out PrefabBase _); n++)
+                {
+                    cloneName = $"{current.name} (copy {n})";
+                }
+                PrefabBase clone = current.Clone(cloneName);
                 prefabSystem.AddPrefab(clone);
                 if (!prefabSystem.TryGetEntity(clone, out Entity cloneEntity))
                 {
