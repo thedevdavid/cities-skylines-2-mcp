@@ -41,6 +41,8 @@ namespace CS2MCP
             public quaternion Rotation;
             /// <summary>0.9.50: pitch/roll/quaternion given; the report checks the live rotation.</summary>
             public bool Tilted;
+            /// <summary>0.9.51: clear Elevation.OnGround after creation so GroundHeightSystem leaves it alone.</summary>
+            public bool Pin;
             public AgeMask Age;
             /// <summary>Net node an outside connection is attached to (CoursePos-like parent of the object).</summary>
             public Entity AttachTo;
@@ -219,6 +221,7 @@ namespace CS2MCP
         private NetGuard m_NetGuard;
         private int m_Protected;
         private bool m_HierarchyPaused;
+        private int m_Pinned;
         // 0.9.44: where an object import spends its time (milliseconds of bridge code per stage,
         // plus wall time between setting Apply and resolving, which is the game's apply frame).
         private readonly System.Diagnostics.Stopwatch m_StageClock = new System.Diagnostics.Stopwatch();
@@ -235,6 +238,7 @@ namespace CS2MCP
             m_Job = job;
             m_NetGuard = new NetGuard(EntityManager, m_GuardEdgeQuery);
             m_Protected = 0;
+            m_Pinned = 0;
             m_DefineMs = m_MatchMs = m_ResolveMs = m_ProtectMs = m_GuardMs = m_ApplyWaitMs = 0;
             m_SettleFramesTotal = 0;
             m_Record = new ObjectRecord { Id = job.Id, Name = job.Name };
@@ -770,6 +774,7 @@ namespace CS2MCP
             m_ApplyWaitMs += (DateTime.UtcNow - m_ApplySetAt).TotalMilliseconds;
             m_StageClock.Restart();
             var protect = new List<Entity>();
+            var pins = new List<(Entity entity, ImportObject obj)>();
             if (m_Current.Delete)
             {
                 m_Deleted += m_Current.Indices.Count;
@@ -791,6 +796,10 @@ namespace CS2MCP
                         {
                             protect.Add(entity);
                         }
+                        if (obj.Pin && obj.Polygon == null)
+                        {
+                            pins.Add((entity, obj));
+                        }
                     }
                     else
                     {
@@ -800,6 +809,10 @@ namespace CS2MCP
                 }
             }
             m_ResolveMs += m_StageClock.Elapsed.TotalMilliseconds;
+            if (pins.Count > 0)
+            {
+                PinObjects(pins);
+            }
             if (protect.Count > 0)
             {
                 m_StageClock.Restart();
@@ -870,6 +883,46 @@ namespace CS2MCP
         /// all objects already on the map: A-v11 trees, apply frame 2.5 s for the first 50 k chunk,
         /// 23.5 s for the tenth. The system is disabled for the import and rebuilt once at the end.
         /// </summary>
+        /// <summary>
+        /// 0.9.51: GroundHeightSystem re-runs ObjectUtils.AdjustPosition on every top-level object
+        /// with Elevation.OnGround (all of them: GenerateObjectsSystem sets OnGround for m_ParentMesh
+        /// &lt; 0) or without Elevation, whenever the terrain changes in its area (roads, terrain paint,
+        /// brushes). That puts y on the terrain + elevation (0 for objects created below the terrain,
+        /// so they are lifted) and, for prefabs that are not Standing, re-tilts them to the terrain
+        /// slope (a pitched plate loses its pitch). Clearing OnGround makes it skip the object; the
+        /// stored elevation is the real height above the terrain, negative allowed.
+        /// </summary>
+        private void PinObjects(List<(Entity entity, ImportObject obj)> pins)
+        {
+            TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
+            foreach ((Entity entity, ImportObject obj) in pins)
+            {
+                if (!EntityManager.Exists(entity) || !EntityManager.HasComponent<Transform>(entity))
+                {
+                    continue;
+                }
+                Transform transform = EntityManager.GetComponentData<Transform>(entity);
+                // Restore the requested placement in case a ground pass already moved it.
+                transform.m_Position = obj.Position;
+                transform.m_Rotation = obj.Rotation;
+                EntityManager.SetComponentData(entity, transform);
+                float elevation = obj.Position.y - TerrainUtils.SampleHeight(ref heightData, obj.Position);
+                if (EntityManager.HasComponent<Game.Objects.Elevation>(entity))
+                {
+                    Game.Objects.Elevation e = EntityManager.GetComponentData<Game.Objects.Elevation>(entity);
+                    e.m_Elevation = elevation;
+                    e.m_Flags &= ~Game.Objects.ElevationFlags.OnGround;
+                    EntityManager.SetComponentData(entity, e);
+                }
+                else
+                {
+                    EntityManager.AddComponentData(entity, new Game.Objects.Elevation(elevation, (Game.Objects.ElevationFlags)0));
+                }
+                EntityManager.AddComponent<Updated>(entity);
+                m_Pinned++;
+            }
+        }
+
         private void PauseHierarchy()
         {
             var hierarchy = World.GetExistingSystemManaged<Game.UI.Editor.EditorHierarchyUISystem>();
@@ -1036,6 +1089,7 @@ namespace CS2MCP
                 completed = abortReason == null,
                 abortReason,
                 objects = new { requested = m_Job.Objects.Count, created = counts["created"], failed = counts["failed"], notRun = counts["pending"] },
+                pinned = m_Pinned,
                 tilt = tiltRequested == 0 ? null : new
                 {
                     requested = tiltRequested,

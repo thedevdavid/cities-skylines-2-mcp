@@ -1056,3 +1056,23 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **What switches:** before every `POST /import*`, `POST /map/load` and `POST /map/time` with a settle, a foreign active tool is replaced by `DefaultToolSystem`. CS2MCP.log records which tool it was.
 - **What does not:** the bridge's own tools (`CS2MCP.*`) are never switched, because that would interrupt an import in progress.
 - **Where the active tool is reported:** in the 5 s heartbeat and in `GET /debug/editor-ui`.
+
+## Round 51 (0.9.51): gallery pillars lifted, `pin`
+
+**A18b report:** the pillar tops stand 0.5–1 m above the roof plates, though the file puts each top at the plate underside.
+
+**Offline check:**
+- **Prefab bounds** (`/prefabs/info`, read-only): Pillar2x8 and Pillar2x16 have their pivot at the base and are 8 m / 16 m tall. BasePlateConcrete16 is 0.2 m thick. None has PlaceableObjectData.
+- **Heightmap** `10211409-dktflls-1to1.png` (scale 2048, top row = north): the terrain is above every pillar base, by 0.5–1.4 m for Pillar2x8 and 4.7–6.6 m for Pillar2x16. The plates are 6–7 m above the ground.
+
+**Mechanism (decompiled):**
+1. The bridge clamped `elevation = max(0, y − ground)`, so pillars got elevation 0.
+2. `GroundHeightSystem` re-runs `ObjectUtils.AdjustPosition` for every top-level object with `OnGround` whenever the terrain changes in its area. That covers all objects: `GenerateObjectsSystem` sets OnGround for `m_ParentMesh < 0`, and objects without an Elevation component count as on ground. Terrain changes include roads, terrain paint (`OnAreaChanged`) and brushes.
+3. `AdjustPosition` sets y = terrain + elevation, which lifts the pillars onto the terrain. For prefabs not flagged `Standing`, it also replaces the rotation with the terrain slope, which explains plates losing their pitch.
+
+**Live check not done:** the editor has no read-only way to list objects by position (`/city/objects` is city-only), and a dry-run POST would switch the owner's tool (0.9.48).
+
+**Fix:** `pin` (per object or `options.pin`).
+- The elevation becomes y − terrain, negative allowed.
+- After creation the bridge restores the requested position and rotation, sets the Elevation with `OnGround` cleared, and marks the object Updated. `GroundHeightSystem` then skips it.
+- The report counts `pinned`.

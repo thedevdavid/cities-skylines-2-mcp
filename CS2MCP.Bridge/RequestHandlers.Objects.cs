@@ -38,6 +38,8 @@ namespace CS2MCP
             public string net;
             /// <summary>Overrides options.grounding.sink for this object.</summary>
             public float? sink;
+            /// <summary>0.9.51: keep y and rotation as given (see options.pin).</summary>
+            public bool? pin;
         }
 
         public sealed class ObjectOptionsDto
@@ -48,6 +50,11 @@ namespace CS2MCP
             public string report;
             public int? settleFrames;
             public GroundingDto grounding;
+            /// <summary>
+            /// 0.9.51: pin every object: its y (also below the terrain) and rotation survive later
+            /// terrain changes (GroundHeightSystem re-grounds and re-tilts on-ground objects).
+            /// </summary>
+            public bool? pin;
         }
 
         /// <summary>Height rule for objects given without y (kinds object and plant).</summary>
@@ -262,7 +269,8 @@ namespace CS2MCP
                 }
                 position.y = y ?? ground;
                 obj.Position = position;
-                obj.Elevation = y.HasValue ? math.max(0f, y.Value - ground) : 0f;
+                obj.Pin = dto.pin ?? options.pin ?? false;
+                obj.Elevation = y.HasValue ? (obj.Pin ? y.Value - ground : math.max(0f, y.Value - ground)) : 0f;
                 if (dto.quaternion != null)
                 {
                     if (dto.quaternion.Length != 4 || math.lengthsq(new float4(dto.quaternion[0], dto.quaternion[1], dto.quaternion[2], dto.quaternion[3])) < 1e-6f)
