@@ -216,6 +216,7 @@ namespace CS2MCP
         private EntityQuery m_GuardEdgeQuery;
         private NetGuard m_NetGuard;
         private int m_Protected;
+        private bool m_HierarchyPaused;
         // 0.9.44: where an object import spends its time (milliseconds of bridge code per stage,
         // plus wall time between setting Apply and resolving, which is the game's apply frame).
         private readonly System.Diagnostics.Stopwatch m_StageClock = new System.Diagnostics.Stopwatch();
@@ -331,6 +332,7 @@ namespace CS2MCP
                 m_RestoreIgnoreErrors = true;
                 m_ToolSystem.ignoreErrors = true;
             }
+            PauseHierarchy();
             m_WarmupLeft = kWarmupFrames;
             m_Stage = Stage.Warmup;
             m_PreviousTool = m_ToolSystem.activeTool;
@@ -404,6 +406,7 @@ namespace CS2MCP
         [Preserve]
         protected override void OnDestroy()
         {
+            ResumeHierarchy();
             RestoreIgnoreErrors();
             base.OnDestroy();
         }
@@ -835,8 +838,44 @@ namespace CS2MCP
             }
         }
 
+        /// <summary>
+        /// 0.9.45: EditorHierarchyUISystem rebuilds the whole Workspace hierarchy (CollectObjects over
+        /// every top-level object, then a filter task over the full list) on every frame in which any
+        /// object is Created/Updated/Deleted. Each applied batch therefore cost time proportional to
+        /// all objects already on the map: A-v11 trees, apply frame 2.5 s for the first 50 k chunk,
+        /// 23.5 s for the tenth. The system is disabled for the import and rebuilt once at the end.
+        /// </summary>
+        private void PauseHierarchy()
+        {
+            var hierarchy = World.GetExistingSystemManaged<Game.UI.Editor.EditorHierarchyUISystem>();
+            if (hierarchy != null && hierarchy.Enabled)
+            {
+                hierarchy.Enabled = false;
+                m_HierarchyPaused = true;
+            }
+        }
+
+        private void ResumeHierarchy()
+        {
+            if (!m_HierarchyPaused)
+            {
+                return;
+            }
+            m_HierarchyPaused = false;
+            var hierarchy = World.GetExistingSystemManaged<Game.UI.Editor.EditorHierarchyUISystem>();
+            if (hierarchy == null)
+            {
+                return;
+            }
+            hierarchy.Enabled = true;
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            typeof(Game.UI.Editor.EditorHierarchyUISystem).GetField("m_HierarchyDirty", flags)?.SetValue(hierarchy, true);
+            typeof(Game.UI.Editor.EditorHierarchyUISystem).GetField("m_FilteringDirty", flags)?.SetValue(hierarchy, true);
+        }
+
         private void Finish(string abortReason)
         {
+            ResumeHierarchy();
             BridgeResponse response;
             if (m_Job != null)
             {

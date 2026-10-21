@@ -181,6 +181,62 @@ namespace CS2MCP
             return texture;
         }
 
+        /// <summary>
+        /// 0.9.45: the mask texture from the world grid in one tight loop (the per-pixel delegate and
+        /// NativeArray indexer cost ~1.5 s per 4096² mask in A-v11).
+        /// </summary>
+        private static Texture2D MaskFromGrid(float[] grid, int n, float2 origin, float cell, int texN, float2 brushOrigin, float brushSide, RasterCalibration cal)
+        {
+            var pixels = new uint[texN * texN];
+            // Grid column/row per texture column/row (each texture axis maps to one world axis).
+            var mapU = new int[texN];
+            var mapV = new int[texN];
+            for (int i = 0; i < texN; i++)
+            {
+                float t = (i + 0.5f) / texN;
+                float a = cal.FlipU ? 1f - t : t;
+                float b = cal.FlipV ? 1f - t : t;
+                // u -> x (or z when transposed), v -> z (or x)
+                float worldU = (cal.Transpose ? brushOrigin.y : brushOrigin.x) + a * brushSide;
+                float worldV = (cal.Transpose ? brushOrigin.x : brushOrigin.y) + b * brushSide;
+                mapU[i] = (int)math.floor((worldU - (cal.Transpose ? origin.y : origin.x)) / cell);
+                mapV[i] = (int)math.floor((worldV - (cal.Transpose ? origin.x : origin.y)) / cell);
+            }
+            for (int py = 0; py < texN; py++)
+            {
+                int gv = mapV[py];
+                if (gv < 0 || gv >= n)
+                {
+                    continue;
+                }
+                int row = py * texN;
+                for (int px = 0; px < texN; px++)
+                {
+                    int gu = mapU[px];
+                    if (gu < 0 || gu >= n)
+                    {
+                        continue;
+                    }
+                    float value = cal.Transpose ? grid[gu * n + gv] : grid[gv * n + gu];
+                    if (value <= 0f)
+                    {
+                        continue;
+                    }
+                    uint c = (uint)(value * 255f + 0.5f);
+                    pixels[row + px] = c | (c << 8) | (c << 16) | (c << 24);
+                }
+            }
+            var texture = new Texture2D(texN, texN, TextureFormat.RGBA32, false, true)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                name = "CS2MCP paint mask",
+            };
+            texture.SetPixelData(pixels, 0);
+            texture.Apply(false, false);
+            return texture;
+        }
+
         private static Color32 ReadRaw(RenderTexture rt, TerrainSystem terrain, float2 world)
         {
             float2 uv = (world - terrain.playableOffset) / terrain.playableArea;
@@ -496,22 +552,7 @@ namespace CS2MCP
                 double t1 = clock.Elapsed.TotalMilliseconds;
                 float2 brushOrigin = centre - brushSide * 0.5f;
                 float texCell = brushSide / texN;
-                Texture2D mask = MaskTexture(texN, (px, py) =>
-                {
-                    float u = (px + 0.5f) / texN, v = (py + 0.5f) / texN;
-                    float a = cal.FlipU ? 1f - u : u;
-                    float b = cal.FlipV ? 1f - v : v;
-                    float2 world = cal.Transpose
-                        ? brushOrigin + new float2(b, a) * brushSide
-                        : brushOrigin + new float2(a, b) * brushSide;
-                    int gx = (int)math.floor((world.x - origin.x) / cell);
-                    int gz = (int)math.floor((world.y - origin.y) / cell);
-                    if (gx < 0 || gz < 0 || gx >= n || gz >= n)
-                    {
-                        return 0;
-                    }
-                    return (byte)math.round(grid[gz * n + gx] * 255f);
-                });
+                Texture2D mask = MaskFromGrid(grid, n, origin, cell, texN, brushOrigin, brushSide, cal);
                 double t2 = clock.Elapsed.TotalMilliseconds;
                 try
                 {

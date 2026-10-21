@@ -987,3 +987,21 @@ So the converter dropped them; it is not a game removal. Check its stub and dead
 - `perf-paint-400.json`: 400 polygons + 2,000 strokes, raster.
 - `perf-paint-400-stamp.json`: the same body with `method: "stamp"`.
 - `perf-trees-100k.json`: batchSize 5000, bypassValidation.
+
+## Round 45 (0.9.45): tree import was quadratic
+
+**A-v11 measurements (0.9.44):**
+- **Build phase:** 7.2 min of bridge time, down from 17.8.
+- **Paint:** 91 s, down from 673.
+- **Trees:** 317 s, with `applyFrameMs` per 50 k chunk = 2.5, 4.7, 6.9 … 23.5 s, linear in the trees already placed. Every other stage was under 120 ms.
+
+**Cause (decompiled `EditorHierarchyUISystem.OnUpdate`):** on any frame whose `m_ModifiedQuery` (top-level objects with Created/Updated/Deleted, Temp excluded) is non-empty, the system rebuilds the whole Workspace hierarchy:
+1. `UpdateHierarchy` → `CollectObjects` over every top-level object;
+2. a filter task copies and filters the full list and refreshes the name caches.
+
+Each applied batch therefore cost time proportional to every object on the map, so the total was quadratic.
+
+**Fixes:**
+- **Hierarchy paused:** `BridgeObjectToolSystem` disables the system while an object import or undo runs and re-enables it in `Finish`/`OnDestroy` with `m_HierarchyDirty`/`m_FilteringDirty` set. That gives one rebuild at the end.
+- **Faster mask build:** the paint mask is now built in one tight loop with `SetPixelData(uint[])`. In A-v11, uploadMs of about 1.5 s per 4096² mask was mostly the per-pixel delegate and NativeArray indexer.
+- **settleFrames:** with bypassValidation, `settleFrames` 2–3 are enough; Generate runs in the frame after Define. A-v11 used 100 per chunk.
