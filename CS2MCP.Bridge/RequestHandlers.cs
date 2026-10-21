@@ -235,6 +235,11 @@ namespace CS2MCP
                     return HierarchyDiagnostics(request);
                 case "/map/checklist":
                     return MapChecklist();
+                case "/map/load":
+                case "/map/load/status":
+                    return MapLoad(request);
+                case "/debug/editor-ui":
+                    return EditorUiDebug();
                 case "/map/save":
                 case "/map/save/status":
                     return MapSave(request);

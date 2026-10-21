@@ -1005,3 +1005,16 @@ Each applied batch therefore cost time proportional to every object on the map, 
 - **Hierarchy paused:** `BridgeObjectToolSystem` disables the system while an object import or undo runs and re-enables it in `Finish`/`OnDestroy` with `m_HierarchyDirty`/`m_FilteringDirty` set. That gives one rebuild at the end.
 - **Faster mask build:** the paint mask is now built in one tight loop with `SetPixelData(uint[])`. In A-v11, uploadMs of about 1.5 s per 4096² mask was mostly the per-pixel delegate and NativeArray indexer.
 - **settleFrames:** with bypassValidation, `settleFrames` 2–3 are enough; Generate runs in the frame after Define. A-v11 used 100 per chunk.
+
+## Round 46 (0.9.46): `/map/load`, editor UI diagnostics
+
+**Owner report (A-v11, after three `/map/save` calls):** the Load Map panel lists the maps and filters, but clicking a row does not select it, so Load/Delete stay disabled.
+
+**From the code:**
+- The buttons are disabled while `AssetPickerAdapter.m_SelectedItem` is null. The UI widget sets it through `ItemPicker.IAdapter.selectedItem`, and no saving or busy flag gates it.
+- `SaveMap` itself sets no panel state. The UI's `OnSaveMap` only adds `CloseSubPanel()` before queueing the same task.
+- UI.log has no error at the click times. It does have "MOVE IT: Error reading Icon rectangle" at each click (06:16–06:22), which suggests the clicks reached a tool instead of the panel.
+
+**Not resolved:** the running game had the older bridge, so `GET /debug/editor-ui` (new) could not be called in that state.
+
+**New:** `POST /map/load?name=` lets the runner reload without the panel.

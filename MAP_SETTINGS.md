@@ -249,3 +249,12 @@ It is a preview only and is not saved with the map. The season look follows the 
 - **What is refused:** `terrainEdit` or `terrainRenderSettings` in `/map/settings`, and `POST /map/terrain-textures`, on a map whose `mapEverSaved` is false. They answer 409 unless `?force=true`.
 - **Why:** the A-v8 and A-v10 native crashes both followed these posts on fresh maps; loaded saves never crashed.
 - **Sequence for the runner:** build, then `POST /map/save?name=…` and wait for `done`, then the look posts, then save again.
+
+## Loading an editor map (`POST /map/load?name=…`, 0.9.46)
+
+- **What it does:** loads through the editor's own path, `MapPanelSystem.LoadMap` → `GameManager.Load(Editor, LoadMap, asset)`, without the "progress loss" dialog. It answers `202`.
+- **Name:** the name as listed in the Load Map panel. An unknown name answers `404` with some of the known names.
+- **Status:** `GET /map/load/status` reports `loading`, then `loaded` once `OnGameLoadingComplete` has run, or `failed` with the error. While the game loads, the bridge answers nothing.
+- **Refused:** while a `/map/save` or another load is still running.
+
+**`GET /debug/editor-ui`:** a diagnostic snapshot of the active tool, the action mode, the game state, the map panel's sub-panel with its asset picker items and selection, the editor panel systems' enabled/running state, and the last save and load jobs.
