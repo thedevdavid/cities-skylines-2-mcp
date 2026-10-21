@@ -1045,3 +1045,14 @@ Player.log shows only UI "Transitioned property…" warnings before it, and no d
 **Crash dumps (owner action, a system setting):** Windows Error Reporting can write full dumps for Cities2.exe. Run, as administrator:
 `reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Cities2.exe" /v DumpType /t REG_DWORD /d 2 /f`
 plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This only works if Mono's handler lets the crash reach WER; the `Native Crash Reporting` block suggests it may not.
+
+**Round 47, context from the owner's logs:**
+- UI.log has "MOVE IT: Error reading Icon rectangle. [MIT04]" at 06:29:11.792, the moment the 120 s settle ended. The last 40 Player.log lines are HUD "Transitioned property…" warnings from the fast settle.
+- Move It was the active tool for the whole session, and also took the owner's Load Map clicks. Both times the editor misbehaved, a mod tool was active while the bridge drove the game.
+- The owner has enabled verbose logging and WER LocalDumps: look for `%LOCALAPPDATA%\CrashDumps\Cities2.exe.*.dmp`.
+
+## Round 48 (0.9.48): default tool before bridge work
+
+- **What switches:** before every `POST /import*`, `POST /map/load` and `POST /map/time` with a settle, a foreign active tool is replaced by `DefaultToolSystem`. CS2MCP.log records which tool it was.
+- **What does not:** the bridge's own tools (`CS2MCP.*`) are never switched, because that would interrupt an import in progress.
+- **Where the active tool is reported:** in the 5 s heartbeat and in `GET /debug/editor-ui`.

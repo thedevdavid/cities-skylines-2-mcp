@@ -47,8 +47,36 @@ namespace CS2MCP
                 && EntityManager.IsComponentEnabled<Game.Prefabs.Locked>(prefabEntity);
         }
 
+        /// <summary>
+        /// 0.9.48: before bridge work that drives the game (imports, /map/load, /map/time with a
+        /// settle) a foreign tool is replaced by the default tool, and the switch is logged. Move It
+        /// was the active tool through A-v11, ate the owner's Load Map clicks and logged at the
+        /// moment of crash #4. The bridge's own tools (CS2MCP.*) are never switched away: that
+        /// would interrupt an import in progress.
+        /// </summary>
+        private void EnsureDefaultTool(BridgeRequest request)
+        {
+            bool drives = request.Method == "POST" && (request.Path.StartsWith("/import", StringComparison.Ordinal)
+                || request.Path == "/map/load"
+                || (request.Path == "/map/time" && (request.Body ?? "").IndexOf("settle", StringComparison.OrdinalIgnoreCase) >= 0));
+            if (!drives)
+            {
+                return;
+            }
+            var tools = World.GetOrCreateSystemManaged<Game.Tools.ToolSystem>();
+            var defaultTool = World.GetOrCreateSystemManaged<Game.Tools.DefaultToolSystem>();
+            Game.Tools.ToolBaseSystem active = tools.activeTool;
+            if (active == null || active == defaultTool || (active.toolID ?? "").StartsWith("CS2MCP", StringComparison.Ordinal))
+            {
+                return;
+            }
+            Mod.Log.Info($"{request.Method} {request.Path}: active tool was '{active.toolID}' ({active.GetType().FullName}); switched to the default tool");
+            tools.activeTool = defaultTool;
+        }
+
         public BridgeResponse Handle(BridgeRequest request)
         {
+            EnsureDefaultTool(request);
             if (request.Path.StartsWith("/build/", StringComparison.Ordinal)
                 && (World.GetOrCreateSystemManaged<BridgeImportToolSystem>().IsBusy
                     || World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().IsBusy))
