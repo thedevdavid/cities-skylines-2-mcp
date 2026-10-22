@@ -154,7 +154,8 @@ namespace CS2MCP
                 BridgeResponse response;
                 // 0.9.34 request journal: the last line before a native crash names the bridge call
                 // in flight (A-v8 crashed twice with an empty managed stack).
-                bool journal = request.Method != "GET" || request.Path.StartsWith("/import", StringComparison.Ordinal);
+                // 0.9.53: every request except status polls (crash #5 followed a GET /camera/set that was not journaled).
+                bool journal = request.Path != "/ping" && !request.Path.EndsWith("/status", StringComparison.Ordinal);
                 LastRequest = $"{DateTime.Now:HH:mm:ss} {request.Method} {request.Path}";
                 if (journal)
                 {

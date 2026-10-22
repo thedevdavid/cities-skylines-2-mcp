@@ -1095,3 +1095,22 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - CS2MCP.dll now references only the game's Managed assemblies.
 
 **Build:** `dotnet build CS2MCP.Traffic/CS2MCP.Traffic.csproj -c Release` builds and deploys both.
+
+## Round 53 (0.9.53): native crash #5 (A-v20)
+
+**Sequence:**
+1. 17:15:33 `POST /import/objects` (trees chunk 03) → 400 "unknown object prefab(s): 'pd Leafy Tree'". The converter had rewritten the files mid-build.
+2. `GET /net/count`; heartbeats at 17:15:36/41 (idle, Default Tool, managed 1.15 GB, unity 2.96 GB).
+3. The shot script's `GET /camera/set` (~5 s later) does not appear in the log.
+4. Native crash, empty managed stack. Player.log has only UI transition warnings and "Unloading 0 unused Assets".
+
+**The 400 path is clean:**
+- The unknown-prefab check runs while parsing the body, before any tool, job, definition or entity exists.
+- Its only native allocation (the prefab lookup `NativeArray`) is in a `using`. `GetHeightData(waitForPending)` allocates nothing.
+- The default-tool switch was a no-op (Default Tool was already active).
+
+**Pattern:** crash #4 came 1.5 s after `/camera/set`; crash #5 came within seconds of a `GET /camera/set` that was not journaled (GET requests were not logged). A camera teleport across a map with ~505 k trees means a burst of streaming and instancing; A-v10 logged "GPU instance buffer size changing to: 80 MB" right before its crash. This is not proven.
+
+**Change:** the request journal now logs every request on arrival except `/ping` and `*/status` polls, so the last line before a crash names the request for certain (including camera and screenshot).
+
+**Dumps:** WER LocalDumps are set but no dump was written. Mono's "Native Crash Reporting" handler probably aborts the process itself. To catch the native exception before it, attach Sysinternals ProcDump to the running game, e.g. `procdump -accepteula -ma -e -w Cities2.exe D:\dumps`, run as the same user before the build starts. This is the owner's action.
