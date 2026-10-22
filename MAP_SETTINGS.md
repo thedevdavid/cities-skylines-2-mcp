@@ -258,3 +258,12 @@ It is a preview only and is not saved with the map. The season look follows the 
 - **Refused:** while a `/map/save` or another load is still running.
 
 **`GET /debug/editor-ui`:** a diagnostic snapshot of the active tool, the action mode, the game state, the map panel's sub-panel with its asset picker items and selection, the editor panel systems' enabled/running state, and the last save and load jobs.
+
+## Starting tiles and starting camera (0.9.60)
+
+- **`GET /map/starting-tiles`:** lists `MapTileSystem`'s start tiles (entity, centre) and the total tile count.
+- **`POST /map/starting-tiles`:** `{tiles:[{index,version}]}`, or `{center:[x,z], size:3}` for a size × size block around the tile nearest the point (`dryRun` supported). It replaces the list the Map panel's "Select Starting Tiles" edits; the list is saved with the map. Editor only.
+- **`GET/POST /map/camera-start`:** `{x,y,z, angleX, angleY, zoom}` or `{capture: true}`. It writes `CityConfigurationSystem.m_CameraPivot / m_CameraAngle / m_CameraZoom`, exactly what "Capture Camera Properties" writes from the current camera.
+- **What "Select Starting Tiles" does:**
+  - It sets `MapTilePurchaseSystem.selecting = true`, which makes `SelectionToolSystem` (`SelectionType.MapTiles`) the active tool. Tiles are toggled by clicking or dragging, and the tool copies the start-tile list in and out.
+  - Selecting ends on the button again ("Stop selecting…"), on the panel's back/Esc (`OnClose`), or whenever any other code sets a different active tool. That includes the bridge's default-tool switch before imports, `/map/load`, settles and demolish/strip, which then shows Default Tool and no grid.

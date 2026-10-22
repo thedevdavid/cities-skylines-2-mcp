@@ -271,6 +271,10 @@ namespace CS2MCP
                     return StripSubObjects(request);
                 case "/build/demolish-area":
                     return DemolishArea(request);
+                case "/map/starting-tiles":
+                    return StartingTiles(request);
+                case "/map/camera-start":
+                    return CameraStart(request);
                 case "/map/load":
                 case "/map/load/status":
                     return MapLoad(request);
