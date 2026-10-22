@@ -57,7 +57,7 @@ namespace CS2MCP
         private void EnsureDefaultTool(BridgeRequest request)
         {
             bool drives = request.Method == "POST" && (request.Path.StartsWith("/import", StringComparison.Ordinal)
-                || request.Path == "/map/load" || request.Path == "/build/demolish-area" || request.Path == "/debug/override-loop"
+                || request.Path == "/map/load" || request.Path == "/build/demolish-area" || request.Path == "/build/strip-subobjects" || request.Path == "/debug/override-loop"
                 || (request.Path == "/map/time" && (request.Body ?? "").IndexOf("settle", StringComparison.OrdinalIgnoreCase) >= 0));
             if (!drives)
             {
@@ -267,6 +267,8 @@ namespace CS2MCP
                     return OverrideLoop(request);
                 case "/objects/near":
                     return ObjectsNear(request);
+                case "/build/strip-subobjects":
+                    return StripSubObjects(request);
                 case "/build/demolish-area":
                     return DemolishArea(request);
                 case "/map/load":

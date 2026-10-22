@@ -181,8 +181,40 @@ namespace CS2MCP
                     objects = pair.prefabs,
                 });
             }
+            // 0.9.58: owned objects (building sub-objects) caught in Anarchy's RemoveOverridenSystem
+            // loop: Overridden or Updated right now, per owning building prefab.
+            var owned = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int ownedTotal = 0;
+            using (EntityQuery ownedQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Objects.Object>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<PrefabRef>() },
+                Any = new[] { ComponentType.ReadOnly<Game.Common.Overridden>(), ComponentType.ReadOnly<Updated>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            }))
+            using (NativeArray<Entity> ownedEntities = ownedQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity e in ownedEntities)
+                {
+                    Entity top = e;
+                    while (EntityManager.HasComponent<Owner>(top))
+                    {
+                        top = EntityManager.GetComponentData<Owner>(top).m_Owner;
+                    }
+                    if (!EntityManager.Exists(top) || !EntityManager.HasComponent<Game.Buildings.Building>(top))
+                    {
+                        continue;
+                    }
+                    string buildingName = prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabData>(EntityManager.GetComponentData<PrefabRef>(top).m_Prefab), out PrefabBase bp) ? bp.name : "?";
+                    string subName = prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabData>(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab), out PrefabBase sp) ? sp.name : "?";
+                    string key = $"{buildingName} / {subName}";
+                    owned[key] = owned.TryGetValue(key, out int c) ? c + 1 : 1;
+                    ownedTotal++;
+                }
+            }
             return BridgeResponse.Json(new
             {
+                ownedInLoop = ownedTotal,
+                owned,
                 buildingsChecked = footprints.Count,
                 objectsInLoop = total,
                 buildings,

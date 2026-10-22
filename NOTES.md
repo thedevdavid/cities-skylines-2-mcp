@@ -1164,3 +1164,19 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **`POST /debug/override-loop?demolish=true`:** removes exactly those objects through the object tool's bulldoze batches, with the same report as `/import/objects/undo`. It is journaled and switches a foreign tool to the default tool first.
 - **Final `/import/objects` report:** now carries `skippedInsideBuildings`, the count per building prefab, compact report included.
 - **A22b first scan (0.9.56):** 100 buildings, 96 objects in the loop. They were rock scatter and streetlights in the OldCastle01 lot, conifers and an alder in 3 RuinsCastle01, rocks at HydroelectricPowerPlant01, and the fort's StandingStone props inside 25 RuinsStoneFormation footprints.
+
+## Round 58 (0.9.58): the castle's own trees (A23 ring)
+
+**A23c:** with the lot masked and `/debug/override-loop` = 0, the castle is still ringed by checker trees. `/objects/near` finds no top-level deciduous tree there. The ring travels with an OldCastle01 dropped elsewhere and vanishes on undo.
+- OldCastle01 (vanilla; "StarQ_SP OldCastle01" in pack 128043 is a different prefab, not in the playset) owns 914 sub-objects, for example OakTree01 and GreenBushWild02 (`/entity/inspect` shows owner = the castle).
+
+**Mechanism (decompiled Anarchy 1.8):**
+- `RemoveOverridenSystem` queries owned + `Updated` + `Overridden` objects, removes `Overridden` and adds `Updated` every frame. It runs when `PreventOverrideInEditor` is on (or in game mode) and the active tool is "Default Tool" or "Bulldoze Tool", or Object/Line/Net with Anarchy enabled, or any top-level PreventOverride object is looping.
+- `OverrideSystem` hides owned objects that something else overlaps, but not their own top-level owner. So a castle tree is overridden by something we imported (net, rock, prop, surface) and then loops between the two systems: the checker ring.
+- **Map players are affected too:** players with Anarchy see the same ring in the default tool, so the overlapping import is the real cause.
+
+**New:**
+- **`GET /debug/override-loop`:** also returns `ownedInLoop` and `owned` (building prefab / sub-object prefab), from owned objects that are Overridden or Updated at the moment of the read.
+- **`POST /build/strip-subobjects`:** `{prefabs, kinds?=[tree, plant], onlyLooping?=true, dryRun?}` deletes the owned tree/plant sub-objects of those building prefabs. By default it deletes only those caught in the loop; `onlyLooping: false` deletes all of the given kinds. The deletion runs at the object tool's next ToolUpdate.
+  - **Not permanent:** `SubObjectSystem` recreates a building's sub-objects whenever the building is Updated. Run it as a last build step; loading does not regenerate them.
+  - **Snapshot caveat:** the "looping" test reads Updated/Overridden in the UI phase, i.e. a snapshot of a per-frame toggle. Dry-run first.

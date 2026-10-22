@@ -223,6 +223,65 @@ namespace CS2MCP
         private NetGuard m_NetGuard;
         private int m_Protected;
         private bool m_HierarchyPaused;
+        private List<Entity> m_StripTargets;
+        private BridgeRequest m_StripRequest;
+        private object m_StripInfo;
+
+        /// <summary>
+        /// 0.9.58: owned sub-objects to delete at the next ToolUpdate (Deleted added from the UI phase
+        /// would be cleared before the modification systems see it).
+        /// </summary>
+        public bool TryQueueStrip(List<Entity> targets, BridgeRequest request, object info, out string error)
+        {
+            error = null;
+            if (m_Stage != Stage.Idle || m_StripTargets != null)
+            {
+                error = "an object import, undo or strip is running";
+                return false;
+            }
+            m_StripTargets = targets;
+            m_StripRequest = request;
+            m_StripInfo = info;
+            return true;
+        }
+
+        private void RunStrip()
+        {
+            List<Entity> targets = m_StripTargets;
+            BridgeRequest request = m_StripRequest;
+            object info = m_StripInfo;
+            m_StripTargets = null;
+            m_StripRequest = null;
+            m_StripInfo = null;
+            int deleted = 0;
+            try
+            {
+                var live = new NativeList<Entity>(targets.Count, Allocator.Temp);
+                foreach (Entity e in targets)
+                {
+                    if (EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e))
+                    {
+                        live.Add(e);
+                    }
+                }
+                deleted = live.Length;
+                if (deleted > 0)
+                {
+                    EntityManager.AddComponent<Deleted>(live.AsArray());
+                }
+                live.Dispose();
+                request.Complete(BridgeResponse.Json(new
+                {
+                    deleted,
+                    info,
+                    note = "owned sub-objects deleted; SubObjectSystem recreates them if the building is Updated later (edit, move, terrain under it), so run this as a last build step and re-check before saving",
+                }));
+            }
+            catch (Exception e)
+            {
+                request.Complete(BridgeResponse.Error(500, $"{e.GetType().Name}: {e.Message}"));
+            }
+        }
         private int m_Pinned;
         // 0.9.44: where an object import spends its time (milliseconds of bridge code per stage,
         // plus wall time between setting Apply and resolving, which is the game's apply frame).
@@ -373,6 +432,10 @@ namespace CS2MCP
         [Preserve]
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
+            if (m_StripTargets != null)
+            {
+                RunStrip();
+            }
             if (m_Stage != Stage.Idle)
             {
                 m_Frames++;
