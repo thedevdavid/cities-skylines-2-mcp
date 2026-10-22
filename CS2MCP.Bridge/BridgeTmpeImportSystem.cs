@@ -42,6 +42,7 @@ namespace CS2MCP
         [Preserve]
         protected override void OnUpdate()
         {
+            OverrideSampler.Sample(EntityManager);
             TmpeJob job = m_Pending;
             if (job == null)
             {

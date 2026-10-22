@@ -103,7 +103,8 @@ namespace CS2MCP
                             {
                                 continue;
                             }
-                            bool looping = EntityManager.HasComponent<Game.Common.Overridden>(e) || EntityManager.HasComponent<Updated>(e);
+                            // 0.9.59: seen Overridden/Updated in any sample of the last ~2 s (OverrideSampler).
+                            bool looping = OverrideSampler.IsLooping(e) || EntityManager.HasComponent<Game.Common.Overridden>(e);
                             if (onlyLooping && !looping)
                             {
                                 kept++;

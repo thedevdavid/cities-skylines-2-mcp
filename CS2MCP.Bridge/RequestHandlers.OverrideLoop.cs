@@ -185,16 +185,14 @@ namespace CS2MCP
             // loop: Overridden or Updated right now, per owning building prefab.
             var owned = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int ownedTotal = 0;
-            using (EntityQuery ownedQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
+            // 0.9.59: from the per-frame sampler (seen Overridden/Updated in the last ~2 s), not one snapshot.
             {
-                All = new[] { ComponentType.ReadOnly<Game.Objects.Object>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<PrefabRef>() },
-                Any = new[] { ComponentType.ReadOnly<Game.Common.Overridden>(), ComponentType.ReadOnly<Updated>() },
-                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
-            }))
-            using (NativeArray<Entity> ownedEntities = ownedQuery.ToEntityArray(Allocator.Temp))
-            {
-                foreach (Entity e in ownedEntities)
+                foreach (Entity e in OverrideSampler.Looping())
                 {
+                    if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e) || !EntityManager.HasComponent<PrefabRef>(e))
+                    {
+                        continue;
+                    }
                     Entity top = e;
                     while (EntityManager.HasComponent<Owner>(top))
                     {

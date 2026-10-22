@@ -147,6 +147,7 @@ namespace CS2MCP
                 Mod.Log.Info("map/time settle finished, simulation paused");
             }
             Heartbeat();
+            OverrideSampler.Sample(EntityManager);
             m_Handlers.EnsureHierarchyCacheCapacity();
             m_Handlers.PumpTerrainTextureJob();
             while (m_Pending.TryDequeue(out BridgeRequest request))

@@ -1190,3 +1190,8 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - A strip still queued after 15 s is dropped on the next strip request, with a warning in the log.
 
 **Unsticking a running 0.9.58 without a restart:** any real `POST /import/objects` (one small object) activates the tool. Its `OnUpdate` runs the pending strip first, deleting the targets captured at queue time, and then the import. Undo the probe object afterwards.
+
+**0.9.59, looping detection:**
+- **Problem:** the one-read test caught 26 of a visible ring of ~130 on A23c. Successive strips found 26, 5, then 0, while the ring stayed.
+- **Fix:** `OverrideSampler` samples owned objects carrying `Overridden` or `Updated` every frame, in ToolUpdate (through the always-running `BridgeTmpeImportSystem`) and UIUpdate (`BridgeSystem`). An entity counts as looping if it was seen in the last 240 samples (~2 s).
+- **Users:** `/debug/override-loop` `owned` and `strip-subobjects` `onlyLooping` now use it. Vanilla-hidden (stably Overridden) owned objects count too; stripping them changes nothing visible.
