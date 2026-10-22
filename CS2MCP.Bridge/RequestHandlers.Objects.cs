@@ -372,6 +372,7 @@ namespace CS2MCP
             {
                 return error;
             }
+            job.SkippedInsideBuildings = skippedInside.Count > 0 ? skippedInside : null;
             if (!World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().TryStartImport(job, request))
             {
                 return BridgeResponse.Error(409, "an object import or undo is already running");

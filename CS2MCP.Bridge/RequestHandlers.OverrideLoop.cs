@@ -113,6 +113,8 @@ namespace CS2MCP
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             var perBuilding = new Dictionary<Entity, (BuildingFootprint building, Dictionary<string, int> prefabs)>();
             int total = 0;
+            var looping = new List<Entity>();
+            var ids = new List<object>();
             using (EntityQuery query = EntityManager.CreateEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Game.Objects.Object>(), ComponentType.ReadOnly<Transform>(), ComponentType.ReadOnly<PrefabRef>(), AnarchyProtection.PreventOverrideType },
@@ -140,7 +142,33 @@ namespace CS2MCP
                     }
                     entry.prefabs[name] = entry.prefabs.TryGetValue(name, out int c) ? c + 1 : 1;
                     total++;
+                    looping.Add(e);
+                    if (ids.Count < 1000)
+                    {
+                        Transform t = EntityManager.GetComponentData<Transform>(e);
+                        ids.Add(new { index = e.Index, version = e.Version, prefab = name, building = hit.Prefab, x = Math.Round(t.m_Position.x, 1), z = Math.Round(t.m_Position.z, 1) });
+                    }
                 }
+            }
+            // 0.9.57: POST ?demolish=true removes exactly these objects through the object tool's
+            // bulldoze batches (same report as /import/objects/undo).
+            if (request.Method == "POST" && request.TryGetBool("demolish", out bool demolish) && demolish)
+            {
+                if (looping.Count == 0)
+                {
+                    return BridgeResponse.Json(new { objectsInLoop = 0, note = "nothing to remove" });
+                }
+                if (TransitToolsBusy(out error))
+                {
+                    return error;
+                }
+                string label = $"override-loop-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+                Mod.Log.Info($"{label}: removing {looping.Count} PreventOverride objects inside building footprints");
+                if (!World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().TryStartDelete(looping, label, request, out string reason))
+                {
+                    return BridgeResponse.Error(409, reason);
+                }
+                return null;
             }
             var buildings = new List<object>();
             foreach (var pair in perBuilding.Values)
@@ -158,7 +186,8 @@ namespace CS2MCP
                 buildingsChecked = footprints.Count,
                 objectsInLoop = total,
                 buildings,
-                note = "PreventOverride objects whose position lies inside a top-level building's prefab geometry bounds (rotated): OverrideSystem and Anarchy's PreventOverrideSystem update them every frame. Remove them (/build/demolish-area) or re-import with options.skipInsideBuildings.",
+                objects = ids,
+                note = "POST /debug/override-loop?demolish=true removes exactly these. PreventOverride objects whose position lies inside a top-level building's prefab geometry bounds (rotated): OverrideSystem and Anarchy's PreventOverrideSystem update them every frame. Remove them (/build/demolish-area) or re-import with options.skipInsideBuildings.",
             });
         }
     }

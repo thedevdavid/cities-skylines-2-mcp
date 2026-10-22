@@ -63,6 +63,8 @@ namespace CS2MCP
             public bool FullReport;
             public bool BypassValidation;
             public List<string> Warnings = new List<string>();
+            /// <summary>0.9.57: objects left out by options.skipInsideBuildings, per building prefab.</summary>
+            public Dictionary<string, int> SkippedInsideBuildings;
         }
 
         public sealed class ObjectRecord
@@ -1089,6 +1091,7 @@ namespace CS2MCP
                 completed = abortReason == null,
                 abortReason,
                 objects = new { requested = m_Job.Objects.Count, created = counts["created"], failed = counts["failed"], notRun = counts["pending"] },
+                skippedInsideBuildings = m_Job.SkippedInsideBuildings,
                 pinned = m_Pinned,
                 tilt = tiltRequested == 0 ? null : new
                 {

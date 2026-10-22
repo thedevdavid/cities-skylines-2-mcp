@@ -1157,3 +1157,10 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 **New:**
 - **`GET /debug/override-loop`:** PreventOverride objects whose position lies inside a top-level building's prefab geometry bounds (rotated), counted per building and prefab.
 - **`/import/objects` `options.skipInsideBuildings`:** leaves such objects out at import, counted in the response as `skippedInsideBuildings` per building prefab. It needs the buildings imported first.
+
+## Round 57 (0.9.57): override-loop cleanup
+
+- **`GET /debug/override-loop`:** also lists the looping objects themselves (`objects`: entity index/version, prefab, building prefab, x/z; up to 1000).
+- **`POST /debug/override-loop?demolish=true`:** removes exactly those objects through the object tool's bulldoze batches, with the same report as `/import/objects/undo`. It is journaled and switches a foreign tool to the default tool first.
+- **Final `/import/objects` report:** now carries `skippedInsideBuildings`, the count per building prefab, compact report included.
+- **A22b first scan (0.9.56):** 100 buildings, 96 objects in the loop. They were rock scatter and streetlights in the OldCastle01 lot, conifers and an alder in 3 RuinsCastle01, rocks at HydroelectricPowerPlant01, and the fort's StandingStone props inside 25 RuinsStoneFormation footprints.
