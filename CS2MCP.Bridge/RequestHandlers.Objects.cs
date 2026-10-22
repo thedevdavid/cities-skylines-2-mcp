@@ -55,6 +55,10 @@ namespace CS2MCP
             /// (vanilla clears plants there; with PreventOverride they loop, see /debug/override-loop).
             /// </summary>
             public bool? skipInsideBuildings;
+            /// <summary>0.9.59: after the import, delete the owned trees/plants of the buildings it created.</summary>
+            public bool? stripOwnedPlants;
+            /// <summary>0.9.59: after the import, delete the owned props (non-plant, non-building objects) of the buildings it created.</summary>
+            public bool? stripOwnedProps;
             /// <summary>
             /// 0.9.51: pin every object: its y (also below the terrain) and rotation survive later
             /// terrain changes (GroundHeightSystem re-grounds and re-tilts on-ground objects).
@@ -373,6 +377,8 @@ namespace CS2MCP
                 return error;
             }
             job.SkippedInsideBuildings = skippedInside.Count > 0 ? skippedInside : null;
+            job.StripOwnedPlants = options.stripOwnedPlants == true;
+            job.StripOwnedProps = options.stripOwnedProps == true;
             if (!World.GetOrCreateSystemManaged<BridgeObjectToolSystem>().TryStartImport(job, request))
             {
                 return BridgeResponse.Error(409, "an object import or undo is already running");

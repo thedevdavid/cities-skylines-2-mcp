@@ -486,6 +486,11 @@ namespace CS2MCP
                 Entity owner = EntityManager.GetComponentData<Game.Common.Owner>(entity).m_Owner;
                 result["owner"] = new { index = owner.Index, version = owner.Version };
             }
+            // 0.9.59: every component's field values (owned sub-objects included).
+            if (request.TryGetBool("values", out bool withValues) && withValues)
+            {
+                result["values"] = ComponentValues(entity);
+            }
             if (EntityManager.HasComponent<Game.Net.Node>(entity))
             {
                 float3 p = EntityManager.GetComponentData<Game.Net.Node>(entity).m_Position;

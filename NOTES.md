@@ -1195,3 +1195,9 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **Problem:** the one-read test caught 26 of a visible ring of ~130 on A23c. Successive strips found 26, 5, then 0, while the ring stayed.
 - **Fix:** `OverrideSampler` samples owned objects carrying `Overridden` or `Updated` every frame, in ToolUpdate (through the always-running `BridgeTmpeImportSystem`) and UIUpdate (`BridgeSystem`). An entity counts as looping if it was seen in the last 240 samples (~2 s).
 - **Users:** `/debug/override-loop` `owned` and `strip-subobjects` `onlyLooping` now use it. Vanilla-hidden (stably Overridden) owned objects count too; stripping them changes nothing visible.
+
+**0.9.59, additions (deployed):**
+- **`GET /entity/inspect?…&values=true`:** every component's field values, owned sub-objects included, for diffing owned against top-level foliage.
+- **`/import/objects` `options.stripOwnedPlants` / `stripOwnedProps`:** after the import, delete the owned trees/plants (or the props: non-plant, non-building sub-objects) of the buildings the import created. Reported as a `stripOwned` warning with the count.
+- **Why:** owned foliage and props of buildings render as placeholders in this playset. Seen on OldCastle01 (OakTree01, LightpolePark04, WallLight04, …) and RuinsCastle01 (GreenBushWildChild01/Teen01/Adult01), independent of the override loop.
+- **Caveat:** like strip-subobjects, `SubObjectSystem` recreates them when the building is Updated later.

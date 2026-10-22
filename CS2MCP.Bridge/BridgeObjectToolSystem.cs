@@ -65,6 +65,8 @@ namespace CS2MCP
             public List<string> Warnings = new List<string>();
             /// <summary>0.9.57: objects left out by options.skipInsideBuildings, per building prefab.</summary>
             public Dictionary<string, int> SkippedInsideBuildings;
+            public bool StripOwnedPlants;
+            public bool StripOwnedProps;
         }
 
         public sealed class ObjectRecord
@@ -1039,9 +1041,76 @@ namespace CS2MCP
             typeof(Game.UI.Editor.EditorHierarchyUISystem).GetField("m_FilteringDirty", flags)?.SetValue(hierarchy, true);
         }
 
+        /// <summary>
+        /// 0.9.59: options.stripOwnedPlants / stripOwnedProps. Owned foliage and props of buildings render as
+        /// placeholders in this playset (A23: OldCastle01, RuinsCastle01), and owned objects that imports
+        /// overlap loop with Anarchy. Deletes them right after the import (ToolUpdate). SubObjectSystem
+        /// recreates them if the building is Updated later.
+        /// </summary>
+        private int StripOwned()
+        {
+            if (m_Job == null || (!m_Job.StripOwnedPlants && !m_Job.StripOwnedProps))
+            {
+                return 0;
+            }
+            var targets = new NativeList<Entity>(Allocator.Temp);
+            try
+            {
+                foreach (ImportObject obj in m_Job.Objects)
+                {
+                    if (obj.Status != "created" || !EntityManager.Exists(obj.Entity) || !EntityManager.HasComponent<Game.Buildings.Building>(obj.Entity))
+                    {
+                        continue;
+                    }
+                    var stack = new Stack<Entity>();
+                    stack.Push(obj.Entity);
+                    while (stack.Count > 0)
+                    {
+                        Entity owner = stack.Pop();
+                        if (!EntityManager.HasBuffer<Game.Objects.SubObject>(owner))
+                        {
+                            continue;
+                        }
+                        foreach (Game.Objects.SubObject sub in EntityManager.GetBuffer<Game.Objects.SubObject>(owner, true))
+                        {
+                            Entity e = sub.m_SubObject;
+                            if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e))
+                            {
+                                continue;
+                            }
+                            stack.Push(e);
+                            bool plant = EntityManager.HasComponent<Game.Objects.Plant>(e) || EntityManager.HasComponent<Game.Objects.Tree>(e);
+                            bool building = EntityManager.HasComponent<Game.Buildings.Building>(e);
+                            if ((plant && m_Job.StripOwnedPlants) || (!plant && !building && m_Job.StripOwnedProps))
+                            {
+                                targets.Add(e);
+                            }
+                        }
+                    }
+                }
+                if (targets.Length > 0)
+                {
+                    EntityManager.AddComponent<Deleted>(targets.AsArray());
+                }
+                return targets.Length;
+            }
+            finally
+            {
+                targets.Dispose();
+            }
+        }
+
         private void Finish(string abortReason)
         {
             ResumeHierarchy();
+            if (m_Job != null)
+            {
+                int stripped = StripOwned();
+                if (stripped > 0 || m_Job.StripOwnedPlants || m_Job.StripOwnedProps)
+                {
+                    m_Job.Warnings.Add($"stripOwned: deleted {stripped} owned sub-object(s) of the created buildings (plants: {m_Job.StripOwnedPlants}, props: {m_Job.StripOwnedProps}); they come back if a building is updated later");
+                }
+            }
             BridgeResponse response;
             if (m_Job != null)
             {
