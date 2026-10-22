@@ -1201,3 +1201,13 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **`/import/objects` `options.stripOwnedPlants` / `stripOwnedProps`:** after the import, delete the owned trees/plants (or the props: non-plant, non-building sub-objects) of the buildings the import created. Reported as a `stripOwned` warning with the count.
 - **Why:** owned foliage and props of buildings render as placeholders in this playset. Seen on OldCastle01 (OakTree01, LightpolePark04, WallLight04, …) and RuinsCastle01 (GreenBushWildChild01/Teen01/Adult01), independent of the override loop.
 - **Caveat:** like strip-subobjects, `SubObjectSystem` recreates them when the building is Updated later.
+
+## Round 63 (0.9.63): content-aware terrain-texture reuse
+
+**0.9.62 bug:** `/map/terrain-textures` named the asset `{texture.name}_{HashUtils.GetHash(texture, file)}` and re-bound an existing asset of that name ("reused the existing asset (same file and hash)"). That hash ignores the pixels. On 2026-10-22 the RGBA alpha-60 re-exports had the same names and sizes as the first v3 set, so texture jobs 2-4 silently re-bound job 1's assets; CS2MCP.log had no "done (import" lines for them. Workaround then: renamed files (`--textures-tag`).
+
+**Fix:** the worker thread hashes the source file next to the import (SHA-1, first 16 hex chars), and the asset name gets `_<hash>` appended. A changed PNG under an unchanged name now imports a new asset; an identical file still reuses the existing one, noted "reused the existing asset (same file content)". `worker: false` hashes on the main thread before the import.
+
+**Side effect:** every 0.9.63 name differs from the 0.9.62 names, so the first job on 0.9.63 imports every file once, even unchanged ones. Old assets stay in `ImportedData/TextureAssets`.
+
+**Build:** `dotnet build CS2MCP.Traffic/CS2MCP.Traffic.csproj -c Release -p:SkipDeploy=true`, 0 warnings. **Not deployed** (game open, owner working by hand). Restart needed for correct results: no for runs that use the texture tags; yes before re-sending textures under unchanged file names.

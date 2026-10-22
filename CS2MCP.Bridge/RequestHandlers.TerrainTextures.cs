@@ -59,6 +59,7 @@ namespace CS2MCP
             public double SaveSeconds;
             public System.Threading.Tasks.Task<TextureImporter.Texture> Task;
             public System.Diagnostics.Stopwatch Clock;
+            public string ContentHash;
         }
 
         private sealed class TextureImportJob
@@ -286,11 +287,16 @@ namespace CS2MCP
                 item.State = "importing";
                 if (job.Worker)
                 {
-                    item.Task = System.Threading.Tasks.Task.Run(() => new DefaultTextureImporter().Import(importSettings, file));
+                    item.Task = System.Threading.Tasks.Task.Run(() =>
+                    {
+                        item.ContentHash = ContentHashOf(file);
+                        return new DefaultTextureImporter().Import(importSettings, file);
+                    });
                     return;
                 }
                 try
                 {
+                    item.ContentHash = ContentHashOf(file);
                     item.Task = System.Threading.Tasks.Task.FromResult(new DefaultTextureImporter().Import(importSettings, file));
                 }
                 catch (Exception e)
@@ -316,15 +322,17 @@ namespace CS2MCP
                 using (TextureImporter.Texture texture = item.Task.Result)
                 {
                     AssetDataPath path = AssetImportPipeline.GetPath(null, UncheckedPath.GetLastPathSegmentOrRoot(item.File, out _),
-                        $"{texture.name}_{HashUtils.GetHash(texture, item.File)}", DataType.RawTexture, user);
+                        $"{texture.name}_{HashUtils.GetHash(texture, item.File)}_{item.ContentHash}", DataType.RawTexture, user);
                     // 0.9.34: the same file gives the same path; never AddAsset over a texture asset
                     // that is already loaded and in use by the terrain (A-v8 job 2 re-imported all 14).
+                    // 0.9.63: HashUtils.GetHash ignores the pixels (a re-exported PNG of the same name and
+                    // size re-bound the old asset), so the name also carries a hash of the file bytes.
                     if (user.Exists(path, out Colossal.IO.AssetDatabase.TextureAsset existing))
                     {
                         field.SetValue(settings, (AssetReference<Colossal.IO.AssetDatabase.TextureAsset>)existing.id.guid);
                         item.Guid = existing.id.guid.ToString();
                         item.AssetName = existing.name;
-                        item.Error = "reused the existing asset (same file and hash)";
+                        item.Error = "reused the existing asset (same file content)";
                         m_ImportedTextureNames[item.Guid] = $"{existing.name} <- {Path.GetFileName(item.File)}";
                         item.State = "done";
                         return;
@@ -350,6 +358,15 @@ namespace CS2MCP
                 item.SaveSeconds = save.Elapsed.TotalSeconds;
             }
             Mod.Log.Info($"terrain texture job {job.Id}: {item.Field} <- {Path.GetFileName(item.File)} {item.State} (import {item.ImportSeconds:F1} s, save {item.SaveSeconds:F1} s){(item.Error != null ? ": " + item.Error : "")}");
+        }
+
+        private static string ContentHashOf(string file)
+        {
+            using (var sha1 = System.Security.Cryptography.SHA1.Create())
+            using (FileStream stream = System.IO.File.OpenRead(file))
+            {
+                return BitConverter.ToString(sha1.ComputeHash(stream)).Replace("-", "").Substring(0, 16).ToLowerInvariant();
+            }
         }
 
         private static void Fail(TextureImportItem item, Exception e)
