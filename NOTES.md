@@ -1180,3 +1180,13 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **`POST /build/strip-subobjects`:** `{prefabs, kinds?=[tree, plant], onlyLooping?=true, dryRun?}` deletes the owned tree/plant sub-objects of those building prefabs. By default it deletes only those caught in the loop; `onlyLooping: false` deletes all of the given kinds. The deletion runs at the object tool's next ToolUpdate.
   - **Not permanent:** `SubObjectSystem` recreates a building's sub-objects whenever the building is Updated. Run it as a last build step; loading does not regenerate them.
   - **Snapshot caveat:** the "looping" test reads Updated/Overridden in the UI phase, i.e. a snapshot of a per-frame toggle. Dry-run first.
+
+## Round 59 (0.9.59): strip-subobjects hung
+
+**0.9.58 bug:** `TryQueueStrip` queued the deletion for `BridgeObjectToolSystem.OnUpdate`, but the game only updates the active tool, and the strip never activated the bridge tool (imports do in `Activate`). The strip never ran, so its lock (`m_StripTargets`) stayed set and every retry answered "an object import, undo or strip is running".
+
+**Fix:**
+- Queueing a strip makes the bridge tool active, and `RunStrip` restores the previous tool.
+- A strip still queued after 15 s is dropped on the next strip request, with a warning in the log.
+
+**Unsticking a running 0.9.58 without a restart:** any real `POST /import/objects` (one small object) activates the tool. Its `OnUpdate` runs the pending strip first, deleting the targets captured at queue time, and then the import. Undo the probe object afterwards.

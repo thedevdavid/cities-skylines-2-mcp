@@ -226,6 +226,8 @@ namespace CS2MCP
         private List<Entity> m_StripTargets;
         private BridgeRequest m_StripRequest;
         private object m_StripInfo;
+        private DateTime m_StripQueuedAt;
+        private ToolBaseSystem m_StripPreviousTool;
 
         /// <summary>
         /// 0.9.58: owned sub-objects to delete at the next ToolUpdate (Deleted added from the UI phase
@@ -234,6 +236,15 @@ namespace CS2MCP
         public bool TryQueueStrip(List<Entity> targets, BridgeRequest request, object info, out string error)
         {
             error = null;
+            if (m_StripTargets != null && (DateTime.UtcNow - m_StripQueuedAt).TotalSeconds > 15)
+            {
+                // 0.9.59: a strip that never ran (0.9.58 queued it without activating the tool,
+                // and only the active tool updates) must not hold the lock forever.
+                Mod.Log.Warn("strip-subobjects: dropping a strip queued more than 15 s ago that never ran");
+                m_StripTargets = null;
+                m_StripRequest = null;
+                m_StripInfo = null;
+            }
             if (m_Stage != Stage.Idle || m_StripTargets != null)
             {
                 error = "an object import, undo or strip is running";
@@ -242,6 +253,13 @@ namespace CS2MCP
             m_StripTargets = targets;
             m_StripRequest = request;
             m_StripInfo = info;
+            m_StripQueuedAt = DateTime.UtcNow;
+            // Tool systems only update while they are the active tool (imports do this in Activate).
+            if (m_ToolSystem.activeTool != this)
+            {
+                m_StripPreviousTool = m_ToolSystem.activeTool;
+                m_ToolSystem.activeTool = this;
+            }
             return true;
         }
 
@@ -253,6 +271,11 @@ namespace CS2MCP
             m_StripTargets = null;
             m_StripRequest = null;
             m_StripInfo = null;
+            if (m_Stage == Stage.Idle && m_ToolSystem.activeTool == this)
+            {
+                m_ToolSystem.activeTool = m_StripPreviousTool != null && m_StripPreviousTool != this ? m_StripPreviousTool : m_DefaultToolSystem;
+            }
+            m_StripPreviousTool = null;
             int deleted = 0;
             try
             {
