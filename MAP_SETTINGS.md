@@ -267,3 +267,11 @@ It is a preview only and is not saved with the map. The season look follows the 
 - **What "Select Starting Tiles" does:**
   - It sets `MapTilePurchaseSystem.selecting = true`, which makes `SelectionToolSystem` (`SelectionType.MapTiles`) the active tool. Tiles are toggled by clicking or dragging, and the tool copies the start-tile list in and out.
   - Selecting ends on the button again ("Stop selecting…"), on the panel's back/Esc (`OnClose`), or whenever any other code sets a different active tool. That includes the bridge's default-tool switch before imports, `/map/load`, settles and demolish/strip, which then shows Default Tool and no grid.
+
+## Publish prep without clicks (0.9.61)
+
+The Map inspector's buttons do not fire from synthetic clicks, so the bridge calls the same code.
+- **`GET /screenshot?ui=false&width=&height=[&save=<path>]`:** renders `Camera.main` through the game's save-preview capture (`ScreenCaptureHelper.CaptureScreenshot` with `SaveGamePreviewSettings`) into a render texture, without the editor UI. `save` writes the PNG to a file and answers JSON; otherwise the PNG is returned.
+- **`POST /map/preview {preview?: path, thumbnail?: path}`:** the Map panel's private `OnSelectPreview(string)` / `OnSelectThumbnail(string)`, i.e. `ImageAsset.ImportImageFromPath` into the fields the Save Map dialog embeds. They are written on the next `/map/save`.
+- **`POST /debug/invoke {system, method}`:** invokes a parameterless method of a `Game.UI.Editor` system, e.g. `{"system":"MapPanelSystem","method":"CaptureCameraProperties"}` or `"ToggleMapTileSelection"`, what the buttons' actions call. An unknown method answers 404 with the list of available ones.
+- **Map name and description:** stay typed by hand. The description lives in the panel's `LocalizationField` per locale; the name is `MapMetadataSystem.mapName`.

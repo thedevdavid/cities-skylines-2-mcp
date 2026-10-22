@@ -275,6 +275,10 @@ namespace CS2MCP
                     return StartingTiles(request);
                 case "/map/camera-start":
                     return CameraStart(request);
+                case "/map/preview":
+                    return MapPreview(request);
+                case "/debug/invoke":
+                    return DebugInvoke(request);
                 case "/map/load":
                 case "/map/load/status":
                     return MapLoad(request);

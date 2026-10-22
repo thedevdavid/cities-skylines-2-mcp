@@ -41,7 +41,27 @@ namespace CS2MCP
             Texture2D output = null;
             try
             {
-                captured = ScreenCapture.CaptureScreenshotAsTexture();
+                bool noUi = request.Query.TryGetValue("ui", out string ui) && (ui == "false" || ui == "0");
+                if (noUi)
+                {
+                    // 0.9.61: the game's save-preview capture (camera into a render texture), no editor UI.
+                    int w = request.TryGetInt("width", out int rw) && rw > 0 ? rw : Screen.width;
+                    int h = request.TryGetInt("height", out int rh) && rh > 0 ? rh : Mathf.RoundToInt((float)w * Screen.height / Screen.width);
+                    RenderTexture rt = Game.UI.ScreenCaptureHelper.CreateRenderTarget("CS2MCP-NoUI", w, h);
+                    Game.UI.ScreenCaptureHelper.CaptureScreenshot(Camera.main, rt, new Game.UI.Menu.MenuHelpers.SaveGamePreviewSettings());
+                    RenderTexture previousActive = RenderTexture.active;
+                    RenderTexture.active = rt;
+                    captured = new Texture2D(w, h, TextureFormat.RGB24, false);
+                    captured.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                    captured.Apply();
+                    RenderTexture.active = previousActive;
+                    rt.Release();
+                    Destroy(rt);
+                }
+                else
+                {
+                    captured = ScreenCapture.CaptureScreenshotAsTexture();
+                }
                 if (captured == null)
                 {
                     // Fallback: read the back buffer directly.
@@ -51,7 +71,7 @@ namespace CS2MCP
                 }
 
                 output = captured;
-                if (request.TryGetInt("width", out int width) && width > 0 && width < captured.width)
+                if (!noUi && request.TryGetInt("width", out int width) && width > 0 && width < captured.width)
                 {
                     output = Downscale(captured, width);
                 }
@@ -60,6 +80,11 @@ namespace CS2MCP
                 if (png == null || png.Length == 0)
                 {
                     request.Complete(BridgeResponse.Error(500, "PNG encode failed"));
+                }
+                else if (request.Query.TryGetValue("save", out string savePath) && !string.IsNullOrEmpty(savePath))
+                {
+                    System.IO.File.WriteAllBytes(savePath, png);
+                    request.Complete(BridgeResponse.Json(new { saved = savePath, bytes = png.Length, width = output.width, height = output.height, ui = !noUi }));
                 }
                 else
                 {
