@@ -263,6 +263,8 @@ namespace CS2MCP
                     return HierarchyDiagnostics(request);
                 case "/map/checklist":
                     return MapChecklist();
+                case "/debug/override-loop":
+                    return OverrideLoop(request);
                 case "/objects/near":
                     return ObjectsNear(request);
                 case "/build/demolish-area":

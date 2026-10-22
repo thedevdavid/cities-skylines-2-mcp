@@ -1140,3 +1140,20 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 - **`CustomMeshColor`:** vanilla. `GenerateObjectsSystem` disables it at creation; it is not mod-added.
 - **`Surface`:** wetness, snow and damage are shader blend values, not texture selectors.
 - **`MeshBatch`:** the per-instance batch, group, mesh and tile indices. This is the one entry that selects which batch and material instance draws the tree, so it is the field to compare first.
+
+## Round 56 (0.9.56): the PreventOverride loop (A21 checker trees)
+
+**Owner probes:**
+- An OldCastle01 dropped onto healthy oaks turned the deciduous trees in its footprint checkered at once; undoing it healed them within seconds.
+- An oak imported inside the lot without bypassValidation was rejected (overlap).
+
+**Mechanism (decompiled):**
+- **Game:** `Game.Objects.OverrideSystem` re-checks every `Updated` object. An `Overridable` object overlapping another object's geometry (here the building) gets `Overridden` + `Updated` (`m_OverriddenUpdatedSet`).
+- **Anarchy 1.8:** `PreventOverrideSystem` queries `PreventOverride` + `Overridden`, removes `Overridden` and adds `Updated`.
+- **Result:** the two never settle. Each such object is Updated every frame and its render entry churns, which shows on deciduous leaf cards as the checker. It also costs CPU wherever imported objects overlap buildings.
+- **No per-instance off switch:** the overlap test uses prefab geometry (`ObjectGeometryData` bounds/collision mask, `GeometryFlags.Overridable`), so nothing on the castle or the tree can disable it.
+- **Vanilla:** clears plants from a building lot.
+
+**New:**
+- **`GET /debug/override-loop`:** PreventOverride objects whose position lies inside a top-level building's prefab geometry bounds (rotated), counted per building and prefab.
+- **`/import/objects` `options.skipInsideBuildings`:** leaves such objects out at import, counted in the response as `skippedInsideBuildings` per building prefab. It needs the buildings imported first.

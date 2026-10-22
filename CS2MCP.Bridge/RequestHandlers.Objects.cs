@@ -51,6 +51,11 @@ namespace CS2MCP
             public int? settleFrames;
             public GroundingDto grounding;
             /// <summary>
+            /// 0.9.56: leave out objects whose position lies inside an existing building's footprint
+            /// (vanilla clears plants there; with PreventOverride they loop, see /debug/override-loop).
+            /// </summary>
+            public bool? skipInsideBuildings;
+            /// <summary>
             /// 0.9.51: pin every object: its y (also below the terrain) and rotation survive later
             /// terrain changes (GroundHeightSystem re-grounds and re-tilts on-ground objects).
             /// </summary>
@@ -175,6 +180,8 @@ namespace CS2MCP
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData(waitForPending: true);
             Bounds3 terrainBounds = TerrainUtils.GetBounds(ref heightData);
+            List<BuildingFootprint> footprints = null;
+            var skippedInside = new Dictionary<string, int>();
             var job = new BridgeObjectToolSystem.ObjectJob
             {
                 Id = $"obj-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{++m_ObjectImportCounter}",
@@ -296,6 +303,15 @@ namespace CS2MCP
                     problems.Add($"object '{dto.id}': age must be seedling, sapling, adult or elderly");
                     continue;
                 }
+                if (options.skipInsideBuildings == true && obj.Kind != "building")
+                {
+                    footprints = footprints ?? BuildingFootprints();
+                    if (InsideFootprint(footprints, obj.Position, out BuildingFootprint hit))
+                    {
+                        skippedInside[hit.Prefab] = skippedInside.TryGetValue(hit.Prefab, out int c) ? c + 1 : 1;
+                        continue;
+                    }
+                }
                 Count(perKind, obj.Kind);
                 job.Objects.Add(obj);
             }
@@ -344,6 +360,7 @@ namespace CS2MCP
                     prefabsResolved = CountPrefabs(job),
                     perKind,
                     grounded,
+                    skippedInsideBuildings = skippedInside,
                     batchSize = job.BatchSize,
                     warningCount = job.Warnings.Count,
                     warnings = job.Warnings.Count > 200 ? job.Warnings.GetRange(0, 200) : job.Warnings,

@@ -154,6 +154,16 @@ namespace CS2MCP
         private static ComponentType s_PreventOverride;
         private static bool s_Available;
 
+        /// <summary>0.9.56: Anarchy's PreventOverride as a read-only query type (Available must be true).</summary>
+        public static ComponentType PreventOverrideType
+        {
+            get
+            {
+                Resolve();
+                return ComponentType.ReadOnly(s_PreventOverride.GetManagedType());
+            }
+        }
+
         public static bool Available
         {
             get
