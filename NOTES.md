@@ -1125,3 +1125,18 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 1. **Virtual-texture cache pressure.** The two VT caches are fixed (329 MB + 649 MB, Player.log). The fort view packs many unique high-resolution mod materials (OldCastle01, Ruins/StandingStones, CliffStack and rock packs, Enhanced Graphics and Textures settings). Pages that never become resident render as a placeholder. Test without writes: frame the same trees with the castle/ruins/cliffs out of view, or lower Options → Graphics → Texture quality (the mip bias, `ManagedBatchSystem.ResetVT`). If the checkers go, it is VT pressure.
 2. **Height-dependent snow layer.** The fort is at ~155–161 m terrain vs ~108 m at the healthy cell (heightmap 10211409). Snow depends on temperature at height (`ClimateSystem.temperatureBaseHeight`, snow-temperature scale 0.01/m). Test: `/map/time` summer date with `clearOverrides`, settle, compare.
 3. **Per-instance state.** Tree state, Elevation/pin, or an area/surface the trees fall into. Compare a fort oak and a healthy oak with `/objects/near?…&prefab=OakTree01&limit=1` once 0.9.54 is loaded.
+
+## Round 55 (0.9.55): component values in `/objects/near`
+
+**A21d:** a checker oak (56117:1, inside the OldCastle01 lot) and a healthy oak (419982:1) carry identical component lists.
+
+**New `values=true` on `/objects/near`:** for every component it dumps the fields by reflection.
+- Plain components via `GetComponentData<T>`, with `enabled` for enableable ones.
+- Buffers as length plus the first 4 elements; nested structs two levels deep.
+- Tags as `tag`.
+
+**From the code:**
+- **`MeshColor`:** written by `MeshColorSystem` from the prefab's `ColorVariation`, including the season filters. Plants never take colours from an external source: `FindExternalSource` returns Null for `Plant`, so a building cannot pass its colours to a tree on its lot.
+- **`CustomMeshColor`:** vanilla. `GenerateObjectsSystem` disables it at creation; it is not mod-added.
+- **`Surface`:** wetness, snow and damage are shader blend values, not texture selectors.
+- **`MeshBatch`:** the per-instance batch, group, mesh and tile indices. This is the one entry that selects which batch and material instance draws the tree, so it is the field to compare first.

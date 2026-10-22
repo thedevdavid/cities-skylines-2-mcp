@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Game.Common;
 using Game.Prefabs;
 using Game.Tools;
@@ -17,6 +18,109 @@ namespace CS2MCP
     /// </summary>
     public sealed partial class RequestHandlers
     {
+        private static MethodInfo s_GetComponentData;
+        private static MethodInfo s_IsComponentEnabled;
+        private static MethodInfo s_GetBuffer;
+
+        /// <summary>
+        /// 0.9.55: field values of every component on the entity, by reflection: plain components
+        /// via EntityManager.GetComponentData&lt;T&gt; (with the enabled state for enableable ones),
+        /// buffers as length plus the first 4 elements; tags as "tag".
+        /// </summary>
+        private Dictionary<string, object> ComponentValues(Entity e)
+        {
+            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            if (s_GetComponentData == null)
+            {
+                foreach (MethodInfo m in typeof(EntityManager).GetMethods(BindingFlags.Instance | BindingFlags.Public))
+                {
+                    ParameterInfo[] p = m.GetParameters();
+                    if (m.Name == "GetComponentData" && m.IsGenericMethodDefinition && p.Length == 1 && p[0].ParameterType == typeof(Entity))
+                    {
+                        s_GetComponentData = m;
+                    }
+                    else if (m.Name == "IsComponentEnabled" && m.IsGenericMethodDefinition && p.Length == 1 && p[0].ParameterType == typeof(Entity))
+                    {
+                        s_IsComponentEnabled = m;
+                    }
+                    else if (m.Name == "GetBuffer" && m.IsGenericMethodDefinition && p.Length == 2 && p[0].ParameterType == typeof(Entity))
+                    {
+                        s_GetBuffer = m;
+                    }
+                }
+            }
+            var result = new Dictionary<string, object>();
+            using (NativeArray<ComponentType> types = EntityManager.GetComponentTypes(e, Allocator.Temp))
+            {
+                foreach (ComponentType type in types)
+                {
+                    Type managed = type.GetManagedType();
+                    if (managed == null)
+                    {
+                        continue;
+                    }
+                    string key = managed.FullName;
+                    try
+                    {
+                        if (type.IsZeroSized)
+                        {
+                            result[key] = "tag";
+                        }
+                        else if (type.IsBuffer)
+                        {
+                            object buffer = s_GetBuffer.MakeGenericMethod(managed).Invoke(EntityManager, new object[] { e, true });
+                            int length = (int)buffer.GetType().GetProperty("Length").GetValue(buffer);
+                            var items = new List<object>();
+                            PropertyInfo indexer = buffer.GetType().GetProperty("Item");
+                            for (int i = 0; i < math.min(length, 4); i++)
+                            {
+                                items.Add(FieldsOf(indexer.GetValue(buffer, new object[] { i }), 2));
+                            }
+                            result[key] = new { length, first = items };
+                        }
+                        else if (type.IsComponent && !type.IsManagedComponent && !type.IsSharedComponent)
+                        {
+                            object data = s_GetComponentData.MakeGenericMethod(managed).Invoke(EntityManager, new object[] { e });
+                            bool? enabled = null;
+                            if (type.IsEnableable && s_IsComponentEnabled != null)
+                            {
+                                enabled = (bool)s_IsComponentEnabled.MakeGenericMethod(managed).Invoke(EntityManager, new object[] { e });
+                            }
+                            result[key] = enabled.HasValue ? (object)new { enabled, fields = FieldsOf(data, 2) } : FieldsOf(data, 2);
+                        }
+                        else
+                        {
+                            result[key] = "shared/managed (not read)";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        result[key] = $"{(ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException.Message : ex.Message)}";
+                    }
+                }
+            }
+            return result;
+
+            object FieldsOf(object value, int depth)
+            {
+                if (value == null)
+                {
+                    return null;
+                }
+                Type t = value.GetType();
+                if (t.IsPrimitive || t.IsEnum || value is string || depth <= 0 || t.Namespace == "Unity.Mathematics" || t == typeof(Entity))
+                {
+                    return value.ToString();
+                }
+                var fields = new Dictionary<string, object>();
+                foreach (FieldInfo f in t.GetFields(any))
+                {
+                    fields[f.Name] = FieldsOf(f.GetValue(value), depth - 1);
+                }
+                return fields.Count > 0 ? (object)fields : value.ToString();
+            }
+        }
+
         private BridgeResponse ObjectsNear(BridgeRequest request)
         {
             if (!TryGetCityOrEditor(out _, out BridgeResponse error))
@@ -29,6 +133,7 @@ namespace CS2MCP
             }
             float radius = request.TryGetFloat("radius", out float r) ? math.clamp(r, 1f, 2000f) : 50f;
             int limit = request.TryGetInt("limit", out int l) ? math.clamp(l, 1, 200) : 10;
+            bool values = request.TryGetBool("values", out bool v) && v;
             request.Query.TryGetValue("prefab", out string prefabFilter);
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             var found = new List<(float d, Entity e, string prefab)>();
@@ -102,6 +207,7 @@ namespace CS2MCP
                     tree,
                     elevation,
                     components,
+                    values = values ? ComponentValues(e) : null,
                 });
             }
             return BridgeResponse.Json(new
