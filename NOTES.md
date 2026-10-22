@@ -1114,3 +1114,14 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 **Change:** the request journal now logs every request on arrival except `/ping` and `*/status` polls, so the last line before a crash names the request for certain (including camera and screenshot).
 
 **Dumps:** WER LocalDumps are set but no dump was written. Mono's "Native Crash Reporting" handler probably aborts the process itself. To catch the native exception before it, attach Sysinternals ProcDump to the running game, e.g. `procdump -accepteula -ma -e -w Cities2.exe D:\dumps`, run as the same user before the build starts. This is the owner's action.
+
+## Round 54 (0.9.54): A21 checkerboard deciduous trees at the fort
+
+**Report:** around the fort (5, −2619) every OakTree01 and pd Leafy Tree renders its leaf cards as a green/white checkerboard, at every distance and after a dwell. The same prefabs 1 km away at (−200, −3600) are fine, and conifers and bushes at the fort are fine.
+
+**Read-only inspection was not possible on 0.9.53:** `/city/objects` is city-only, `/entity/inspect` needs an index, and a dry-run POST switches the owner's tool. New: `GET /objects/near?x=&z=&radius=&limit=&prefab=` (works in the editor) lists the nearest top-level objects. For each it gives the entity id, prefab, transform, tree state/growth, elevation (value, flags) and every component type.
+
+**Hypotheses, in order:**
+1. **Virtual-texture cache pressure.** The two VT caches are fixed (329 MB + 649 MB, Player.log). The fort view packs many unique high-resolution mod materials (OldCastle01, Ruins/StandingStones, CliffStack and rock packs, Enhanced Graphics and Textures settings). Pages that never become resident render as a placeholder. Test without writes: frame the same trees with the castle/ruins/cliffs out of view, or lower Options → Graphics → Texture quality (the mip bias, `ManagedBatchSystem.ResetVT`). If the checkers go, it is VT pressure.
+2. **Height-dependent snow layer.** The fort is at ~155–161 m terrain vs ~108 m at the healthy cell (heightmap 10211409). Snow depends on temperature at height (`ClimateSystem.temperatureBaseHeight`, snow-temperature scale 0.01/m). Test: `/map/time` summer date with `clearOverrides`, settle, compare.
+3. **Per-instance state.** Tree state, Elevation/pin, or an area/surface the trees fall into. Compare a fort oak and a healthy oak with `/objects/near?…&prefab=OakTree01&limit=1` once 0.9.54 is loaded.
