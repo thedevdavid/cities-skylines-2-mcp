@@ -275,3 +275,12 @@ The Map inspector's buttons do not fire from synthetic clicks, so the bridge cal
 - **`POST /map/preview {preview?: path, thumbnail?: path}`:** the Map panel's private `OnSelectPreview(string)` / `OnSelectThumbnail(string)`, i.e. `ImageAsset.ImportImageFromPath` into the fields the Save Map dialog embeds. They are written on the next `/map/save`.
 - **`POST /debug/invoke {system, method}`:** invokes a parameterless method of a `Game.UI.Editor` system, e.g. `{"system":"MapPanelSystem","method":"CaptureCameraProperties"}` or `"ToggleMapTileSelection"`, what the buttons' actions call. An unknown method answers 404 with the list of available ones.
 - **Map name and description:** stay typed by hand. The description lives in the panel's `LocalizationField` per locale; the name is `MapMetadataSystem.mapName`.
+
+## Saving the look prefabs for other maps (`POST /map/look/save-prefabs`, 0.9.62)
+
+- **Request:** `{kinds?: ["climate","water","terrain"], name: "Dakota Falls"}`.
+- **What it writes:** renamed clones of the current look prefabs, `<name> Climate` / `<name> Water` / `<name> Terrain`, saved as standalone user prefabs under `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\ImportedData\<name>\<clone>.Prefab`. That is the path the editor's Save asset action (`InspectorPanelSystem.SaveAsset`) uses.
+- **Pickable at once:** the clones are added to the `PrefabSystem`.
+- **Result:** the response lists each clone's guid and path. A name already taken answers a problem for that kind.
+- **The map's own copies stay untouched on purpose:** the map save embeds only look prefabs without a persistent asset (`PrefabSystem.SavePrefab`), so saving the map's own copy standalone would drop it from the published map.
+- **In another map:** pick them in the Climate / Water / Terrain panels or with `/map/settings {climate | waterRenderSettings | terrainRenderSettings: "<name> Climate"}`. The terrain clone references the user TextureAssets (`ImportedData/TextureAssets`), so that works on the same PC.

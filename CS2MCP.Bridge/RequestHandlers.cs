@@ -253,6 +253,8 @@ namespace CS2MCP
                     return GraphDiff(request);
                 case "/net/count":
                     return NetCount();
+                case "/map/look/save-prefabs":
+                    return SaveLookPrefabs(request);
                 case "/map/look/schema":
                     return LookSchema();
                 case "/net/pillars/remove":
