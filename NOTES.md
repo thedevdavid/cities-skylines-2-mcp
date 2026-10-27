@@ -1211,3 +1211,5 @@ plus `/v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f`. This on
 **Side effect:** every 0.9.63 name differs from the 0.9.62 names, so the first job on 0.9.63 imports every file once, even unchanged ones. Old assets stay in `ImportedData/TextureAssets`.
 
 **Build:** `dotnet build CS2MCP.Traffic/CS2MCP.Traffic.csproj -c Release -p:SkipDeploy=true`, 0 warnings. **Not deployed** (game open, owner working by hand). Restart needed for correct results: no for runs that use the texture tags; yes before re-sending textures under unchanged file names.
+
+upstream merge 2026-10-27: 2 commits (4b6ea95 bridge HTTP hardening: Host/Origin checks, POST for mutating routes, optional CS2MCP_TOKEN; 72bd7e0 README.CHS update). Kept our 16 MB body limit, 15 min import timeout and bridgeFetch init (POST bodies); /camera/set exempted from POST-only so GET shot scripts keep working.

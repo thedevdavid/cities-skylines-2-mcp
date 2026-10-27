@@ -13,12 +13,31 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
 const BRIDGE_URL = (process.env.CS2_BRIDGE_URL ?? "http://127.0.0.1:8642").replace(/\/+$/, "");
+const BRIDGE_TOKEN = process.env.CS2MCP_TOKEN?.trim() ?? "";
 
 class BridgeError extends Error {}
 
+/** Routes that change game state; must match IsMutatingPath in CS2MCP.Bridge/HttpBridgeServer.cs. */
+function isMutatingPath(path: string): boolean {
+  return (
+    path.startsWith("/build/") ||
+    path.startsWith("/sim/") ||
+    (path.endsWith("/set") && path !== "/camera/set") || // editor-import: view-only, shot scripts GET it
+    ["/game/save", "/city/tiles/buy", "/transit/stops/place", "/transit/lines/create", "/transit/lines/delete"].includes(path)
+  );
+}
+
 async function bridgeFetch(path: string, timeoutMs: number, init?: RequestInit): Promise<Response> {
+  const route = path.split("?", 1)[0];
+  const headers = new Headers(init?.headers);
+  if (BRIDGE_TOKEN) headers.set("X-CS2MCP-Token", BRIDGE_TOKEN);
   try {
-    return await fetch(`${BRIDGE_URL}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return await fetch(`${BRIDGE_URL}${path}`, {
+      ...init,
+      method: init?.method ?? (isMutatingPath(route) ? "POST" : "GET"),
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
   } catch (err) {
     throw new BridgeError(
       `Cannot reach the CS2 bridge at ${BRIDGE_URL} (${(err as Error).message}). ` +

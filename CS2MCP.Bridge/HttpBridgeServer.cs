@@ -22,8 +22,11 @@ namespace CS2MCP
         private const int MainThreadTimeoutMs = 10000;
         // Network imports and their undo run over many tool frames.
         private const int ImportTimeoutMs = 15 * 60 * 1000;
+        private const string TokenHeader = "X-CS2MCP-Token";
+        private const string TokenEnvVar = "CS2MCP_TOKEN";
 
         private readonly int m_Port;
+        private readonly string m_Token;
         private readonly Action<BridgeRequest> m_EnqueueToMainThread;
         private TcpListener m_Listener;
         private Thread m_AcceptThread;
@@ -33,10 +36,16 @@ namespace CS2MCP
         {
             m_Port = port;
             m_EnqueueToMainThread = enqueueToMainThread;
+            string token = Environment.GetEnvironmentVariable(TokenEnvVar);
+            m_Token = string.IsNullOrEmpty(token) ? null : token.Trim();
         }
 
         public void Start()
         {
+            if (m_Token == null)
+            {
+                Mod.Log.Warn($"{TokenEnvVar} is not set: requests are not authenticated (Host/Origin/POST checks still apply)");
+            }
             m_Listener = new TcpListener(IPAddress.Loopback, m_Port);
             m_Listener.Start();
             m_Running = true;
@@ -106,11 +115,33 @@ namespace CS2MCP
 
         private BridgeResponse Dispatch(BridgeRequest request)
         {
+            // DNS rebinding: a browser page reaching us through its own
+            // hostname still sends that hostname in Host.
+            if (!IsLoopbackHost(request.Host))
+            {
+                return BridgeResponse.Error(403, "Host header must be 127.0.0.1:" + m_Port + " or localhost:" + m_Port);
+            }
+            // Browsers attach Origin to cross-site requests; the MCP server never does.
+            if (request.Origin != null)
+            {
+                return BridgeResponse.Error(403, "cross-origin requests are not allowed");
+            }
+
             // Liveness check, answered off the simulation thread so it works
             // even while the game is loading a save.
             if (request.Path == "/ping")
             {
                 return HandlePing();
+            }
+
+            // Token is optional: enforced only when CS2MCP_TOKEN is set for the game process.
+            if (m_Token != null && !TokenEquals(request.Token, m_Token))
+            {
+                return BridgeResponse.Error(401, "missing or invalid " + TokenHeader + " header");
+            }
+            if (IsMutatingPath(request.Path) && request.Method != "POST")
+            {
+                return BridgeResponse.Error(405, request.Path + " changes game state and requires POST");
             }
 
             m_EnqueueToMainThread(request);
@@ -119,6 +150,46 @@ namespace CS2MCP
             return response ?? BridgeResponse.Error(503, import
                 ? "import did not finish within 15 minutes; it may still be running, see GET /import/status"
                 : "simulation thread did not respond within 10s (game still loading, or bridge system disabled)");
+        }
+
+        private bool IsLoopbackHost(string host)
+        {
+            return host != null
+                && (host.Equals("127.0.0.1:" + m_Port, StringComparison.OrdinalIgnoreCase)
+                    || host.Equals("localhost:" + m_Port, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>Constant-time comparison so the token can't be guessed by timing.</summary>
+        private static bool TokenEquals(string supplied, string expected)
+        {
+            if (supplied == null)
+            {
+                return false;
+            }
+            byte[] a = Encoding.UTF8.GetBytes(supplied);
+            byte[] b = Encoding.UTF8.GetBytes(expected);
+            int diff = a.Length ^ b.Length;
+            for (int i = 0; i < b.Length; i++)
+            {
+                diff |= (i < a.Length ? a[i] : 0) ^ b[i];
+            }
+            return diff == 0;
+        }
+
+        /// <summary>
+        /// Routes that change game state. Must match isMutatingPath in
+        /// mcp-server/src/index.ts.
+        /// </summary>
+        public static bool IsMutatingPath(string path)
+        {
+            return path.StartsWith("/build/", StringComparison.Ordinal)
+                || path.StartsWith("/sim/", StringComparison.Ordinal)
+                || (path.EndsWith("/set", StringComparison.Ordinal) && path != "/camera/set") // editor-import: camera moves are view-only; shot scripts GET it
+                || path == "/game/save"
+                || path == "/city/tiles/buy"
+                || path == "/transit/stops/place"
+                || path == "/transit/lines/create"
+                || path == "/transit/lines/delete";
         }
 
         private static BridgeResponse HandlePing()
@@ -189,6 +260,18 @@ namespace CS2MCP
                 if (name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
                 {
                     int.TryParse(value, out contentLength);
+                }
+                else if (name.Equals("Host", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Host = value;
+                }
+                else if (name.Equals("Origin", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Origin = value;
+                }
+                else if (name.Equals(TokenHeader, StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Token = value;
                 }
             }
 
