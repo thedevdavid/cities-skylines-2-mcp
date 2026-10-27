@@ -8,9 +8,9 @@
 //   node scripts/import-tmpe.mjs --status       last report
 //   node scripts/import-tmpe.mjs --write-only   only write the request file (--out), no bridge call
 //
-// Inputs (defaults relative to this repo's parent folder, D:\work\mods\csl2-editor):
+// Inputs (defaults relative to this repo's parent folder, a workspace holding this repo next to the converter):
 //   --tmpe  cs1-offline/out/tmpe-offline.json
-//   --dump  newest map-*.json in %LOCALAPPDATA%\DakotaExport (CS1 net prefabs, segment geometry)
+//   --dump  newest map-*.json in $CS1_DUMP_DIR (the CS1 exporter's output folder: CS1 net prefabs, segment geometry)
 //   --body  net-converter/out/import-all.json (the imported network: CS1 node n<id> -> CS2 position,
 //           CS1 segment e<segment>_k -> CS2 course). Nodes and segments missing there fall back to the dump.
 //   --out   out/tmpe-import-request.json, --report-out out/tmpe-import-report.json (under scripts/..)
@@ -58,7 +58,8 @@ function parseArgs(argv) {
 }
 
 async function newestDump() {
-  const dir = join(process.env.LOCALAPPDATA ?? "", "DakotaExport");
+  const dir = process.env.CS1_DUMP_DIR;
+  if (!dir) throw new Error("set CS1_DUMP_DIR to the CS1 exporter's output folder, or pass --dump");
   const files = (await readdir(dir)).filter((f) => /^map-.*\.json$/.test(f)).sort();
   if (!files.length) throw new Error(`no map-*.json in ${dir}; pass --dump`);
   return join(dir, files[files.length - 1]);
@@ -115,7 +116,7 @@ function build(tmpe, dump, body, args) {
     if (!bodyEdgesBySeg.has(k)) bodyEdgesBySeg.set(k, []);
     bodyEdgesBySeg.get(k).push(e);
   }
-  // CS2 height factor: body node y / CS1 node y (round 6: 2).
+  // CS2 height factor: body node y / CS1 node y (measured: 2).
   const ratios = [];
   for (const n of body.nodes) {
     const c = node.get(Number(String(n.id).replace(/^n/, "")));

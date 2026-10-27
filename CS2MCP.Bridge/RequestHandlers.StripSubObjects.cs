@@ -11,7 +11,7 @@ using Transform = Game.Objects.Transform;
 namespace CS2MCP
 {
     /// <summary>
-    /// 0.9.58: POST /build/strip-subobjects. The A23 ring of checker trees around OldCastle01 were
+    /// 0.9.58: POST /build/strip-subobjects. A ring of checker trees around an imported building were
     /// the building's OWN tree sub-objects: OverrideSystem hides owned objects that something
     /// else overlaps (Overridden + Updated), and Anarchy's RemoveOverridenSystem strips Overridden
     /// (+ Updated) from every owned overridden object each frame while the active tool is Default or

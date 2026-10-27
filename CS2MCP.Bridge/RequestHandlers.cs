@@ -50,7 +50,7 @@ namespace CS2MCP
         /// <summary>
         /// 0.9.48: before bridge work that drives the game (imports, /map/load, /map/time with a
         /// settle) a foreign tool is replaced by the default tool, and the switch is logged. Move It
-        /// was the active tool through A-v11, ate the owner's Load Map clicks and logged at the
+        /// was the active tool in early test imports, ate the owner's Load Map clicks and logged at the
         /// moment of crash #4. The bridge's own tools (CS2MCP.*) are never switched away: that
         /// would interrupt an import in progress.
         /// </summary>

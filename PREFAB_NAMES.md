@@ -83,11 +83,11 @@ The lane/marker names (`High-voltage Cable Lane`, `Low-voltage Marker`, …) are
 | `Narrow Seaway`, `Medium Seaway`, `Wide Seaway` | the placeable ship paths for cargo and passenger ships (lane `Ship Drive Lane 50`) |
 | `Narrow Boatway`, `Medium Boatway`, `Wide Boatway` | paths for smaller boats (most likely the Bridges & Ports boat lines) |
 
-`ShipwayBuoy01` is a prop. Whether a seaway node on the border spawns `Ship Outside Connection - Twoway` by itself, as roads do, is to be checked in-game (NOTES.md). `GenerateNodesSystem` tags border nodes of any net with `Game.Net.OutsideConnection`; the marker appears only if the seaway prefab lists it as a sub-object that requires an outside connection.
+`ShipwayBuoy01` is a prop. Whether a seaway node on the border spawns `Ship Outside Connection - Twoway` by itself, as roads do, is to be checked in-game. `GenerateNodesSystem` tags border nodes of any net with `Game.Net.OutsideConnection`; the marker appears only if the seaway prefab lists it as a sub-object that requires an outside connection.
 
 ## Custom assets (PDX Mods packs) and decals
 
-- **How custom assets are found:** packs loaded in the playset register with the same `PrefabSystem` as vanilla ones, so `/import/objects` resolves their names the same way. `GET /prefabs?category=object&query=…&limit=1000&offset=…` (MCP `cs2_find_prefabs`, category `object`) lists every object prefab: props, decals, rocks, bushes, markers, trees and buildings, custom ones included. Use it to check the converter's names against the live list. To be confirmed at game time (NOTES.md).
+- **How custom assets are found:** packs loaded in the playset register with the same `PrefabSystem` as vanilla ones, so `/import/objects` resolves their names the same way. `GET /prefabs?category=object&query=…&limit=1000&offset=…` (MCP `cs2_find_prefabs`, category `object`) lists every object prefab: props, decals, rocks, bushes, markers, trees and buildings, custom ones included. Use it to check the converter's names against the live list. To be confirmed at game time.
 - **Decals:** CS2 has no separate decal prefab kind. A decal is an ordinary static object prefab whose mesh (`RenderPrefab`) carries `DecalProperties` and is projected onto the surface below. `/import/objects` places it through the same object definition path as any prop. Leave `y` empty (terrain surface) and use `rotation` for the yaw.
 - **Surfaces:** list them with `GET /prefabs?category=surface`.
 

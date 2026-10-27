@@ -128,7 +128,7 @@ namespace CS2MCP
                     {
                         // Cheap pre-filter on Node.m_Position, then the curve meeting point: the
                         // game's node reduction can leave m_Position up to tens of metres from where
-                        // the edge curves actually meet (A-v6: node 54722, 25.8 m).
+                        // the edge curves actually meet (25.8 m off in one test).
                         if (math.distance(nodePosition.xz, wantedXZ) > searchRadius + 60f)
                         {
                             continue;
@@ -952,7 +952,7 @@ namespace CS2MCP
         }
 
         /// <summary>
-        /// 0.9.30: an edge shorter than 15 m (A-v7: 4-8 m stubs of the neighbouring prefab where the import
+        /// 0.9.30: an edge shorter than 15 m (e.g. 4-8 m stubs of the neighbouring prefab where the import
         /// put the prefab change a few metres off the CS1 node) gets the shape of the edge that continues
         /// it straight on at its far node (degree 2, |angle| &lt; 30 deg) appended, so probes 20 m out still
         /// find the stub as the edge in that direction. Lanes and Traffic data stay on the stub itself.

@@ -116,7 +116,7 @@ namespace CS2MCP
             return BridgeResponse.Json(new
             {
                 error = "terrain render edits (terrainEdit, terrainRenderSettings, terrain textures) are refused on a map that has never been saved",
-                why = "A-v8 and A-v10 crashed natively right after terrain-cs1 on fresh, unsaved maps; on loaded saves the same posts never crashed",
+                why = "Two test sessions crashed natively right after terrain-cs1 on fresh, unsaved maps; on loaded saves the same posts never crashed",
                 fix = "POST /map/save?name=<name> first (or load a saved map), then repeat; ?force=true overrides",
             }, 409);
         }

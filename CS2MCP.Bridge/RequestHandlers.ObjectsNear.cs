@@ -14,7 +14,7 @@ namespace CS2MCP
     /// <summary>
     /// 0.9.54: GET /objects/near?x=&amp;z=&amp;radius=&amp;limit=&amp;prefab= — read-only list of the top-level
     /// objects nearest a point, in the editor as in a city: entity id, prefab, transform, tree state,
-    /// elevation and every component type, so two instances can be compared (A21 checkerboard trees).
+    /// elevation and every component type, so two instances can be compared (checkerboard trees).
     /// </summary>
     public sealed partial class RequestHandlers
     {

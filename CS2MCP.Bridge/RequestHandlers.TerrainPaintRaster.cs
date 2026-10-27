@@ -14,7 +14,7 @@ namespace CS2MCP
 {
     /// <summary>
     /// 0.9.44: raster terrain paint. Instead of one TerrainMaterialSystem.ApplyBrush per stamp
-    /// (A-v10: 1.6 M stamps, 11 min), every group of polygons with the same material and strength
+    /// (1.6 M stamps, 11 min on a large map), every group of polygons with the same material and strength
     /// is rasterised on the CPU into one coverage mask (inside 1, the feather as a linear ramp
     /// from the outline, softEdge as an outward ramp) and handed to the game's own private
     /// TerrainMaterialSystem.ApplyToSplatmap as the brush texture of a single square brush over
@@ -184,7 +184,7 @@ namespace CS2MCP
 
         /// <summary>
         /// 0.9.45: the mask texture from the world grid in one tight loop (the per-pixel delegate and
-        /// NativeArray indexer cost ~1.5 s per 4096² mask in A-v11).
+        /// NativeArray indexer cost ~1.5 s per 4096² mask in testing).
         /// </summary>
         private static Texture2D MaskFromGrid(float[] grid, int n, float2 origin, float cell, int texN, float2 brushOrigin, float brushSide, RasterCalibration cal)
         {

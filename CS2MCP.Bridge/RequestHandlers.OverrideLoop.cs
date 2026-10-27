@@ -14,7 +14,7 @@ namespace CS2MCP
     /// 0.9.56: the PreventOverride loop. Game.Objects.OverrideSystem gives an Overridable object that
     /// overlaps a building's geometry Overridden + Updated; Anarchy's PreventOverrideSystem removes
     /// Overridden from every PreventOverride entity and adds Updated; OverrideSystem re-checks every
-    /// Updated object, so the pair never settles. Each such object is updated every frame (A21: the
+    /// Updated object, so the pair never settles. Each such object is updated every frame (seen with the
     /// deciduous trees inside the OldCastle01 lot rendered as a checkerboard; undoing the castle
     /// healed them within seconds). Vanilla clears plants from a building lot instead.
     /// GET /debug/override-loop lists PreventOverride objects inside building footprints;

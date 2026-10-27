@@ -49,7 +49,7 @@ namespace CS2MCP
         /// <summary>
         /// 0.9.47: every 5 s one INFO line in CS2MCP.log with the frame, simulation speed, active tool,
         /// last request and memory (managed, Unity total allocated, graphics driver). A native crash
-        /// leaves no stack (A-v8 x2, A-v10, A-v11); the last heartbeats show the state and any
+        /// leaves no stack (seen several times in testing); the last heartbeats show the state and any
         /// memory growth just before it.
         /// </summary>
         private void Heartbeat()
@@ -154,7 +154,7 @@ namespace CS2MCP
             {
                 BridgeResponse response;
                 // 0.9.34 request journal: the last line before a native crash names the bridge call
-                // in flight (A-v8 crashed twice with an empty managed stack).
+                // in flight (a test import crashed twice with an empty managed stack).
                 // 0.9.53: every request except status polls (crash #5 followed a GET /camera/set that was not journaled).
                 bool journal = request.Path != "/ping" && !request.Path.EndsWith("/status", StringComparison.Ordinal);
                 LastRequest = $"{DateTime.Now:HH:mm:ss} {request.Method} {request.Path}";

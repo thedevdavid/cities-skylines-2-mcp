@@ -671,7 +671,7 @@ namespace CS2MCP
             // GenerateAreas helper write them). An incomplete area is validated with noErrors, so
             // what it overlaps gets the Warning component instead of Error, and on Apply
             // ToolApplySystem adds Deleted to every Warning entity: with bypassValidation every
-            // imported surface deleted the net segments and objects under it (A-v4: 309 segments).
+            // imported surface deleted the net segments and objects under it (309 segments in one test).
             float2 first = obj.Polygon[0];
             nodes.Add(new Game.Areas.Node(new float3(first.x, 0f, first.y), float.MinValue));
         }
@@ -970,7 +970,7 @@ namespace CS2MCP
         /// 0.9.45: EditorHierarchyUISystem rebuilds the whole Workspace hierarchy (CollectObjects over
         /// every top-level object, then a filter task over the full list) on every frame in which any
         /// object is Created/Updated/Deleted. Each applied batch therefore cost time proportional to
-        /// all objects already on the map: A-v11 trees, apply frame 2.5 s for the first 50 k chunk,
+        /// all objects already on the map: with a large tree import, apply frame 2.5 s for the first 50 k chunk,
         /// 23.5 s for the tenth. The system is disabled for the import and rebuilt once at the end.
         /// </summary>
         /// <summary>
@@ -1043,7 +1043,7 @@ namespace CS2MCP
 
         /// <summary>
         /// 0.9.59: options.stripOwnedPlants / stripOwnedProps. Owned foliage and props of buildings render as
-        /// placeholders in this playset (A23: OldCastle01, RuinsCastle01), and owned objects that imports
+        /// placeholders in some playsets (a building whose own sub-objects render as placeholders), and owned objects that imports
         /// overlap loop with Anarchy. Deletes them right after the import (ToolUpdate). SubObjectSystem
         /// recreates them if the building is Updated later.
         /// </summary>

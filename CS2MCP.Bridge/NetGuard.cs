@@ -13,7 +13,7 @@ namespace CS2MCP
 {
     /// <summary>
     /// 0.9.24: watches the network while a non-network import runs (objects, surfaces).
-    /// Those imports should never remove a segment; A-v4 lost 309 imported segments
+    /// Those imports should never remove a segment; one test import lost 309 imported segments
     /// (mostly in chains under the imported field, sand and pavement surfaces) at an
     /// unknown step. A snapshot of every segment before each batch is compared after the
     /// batch is applied, so the report names the batch (and its item ids) that lost any.

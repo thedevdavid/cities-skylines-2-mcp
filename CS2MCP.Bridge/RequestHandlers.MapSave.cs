@@ -13,7 +13,7 @@ namespace CS2MCP
     /// 0.9.43: POST /map/save?name=&lt;name&gt;[&amp;overwrite=true] saves the editor map through the
     /// editor's own path (MapPanelSystem.OnSaveMap → SaveMap on the "SaveLoadGame" task queue)
     /// and reports the real outcome in GET /map/save/status. A name that already exists in the
-    /// user database answers 409 unless overwrite=true (A-v8 lost three saves silently under a
+    /// user database answers 409 unless overwrite=true (a test session lost three saves silently under a
     /// name still registered to a failed save).
     /// </summary>
     public sealed partial class RequestHandlers
@@ -186,7 +186,7 @@ namespace CS2MCP
 
         /// <summary>
         /// 0.9.43: true when the current editor map came from a save or was saved by /map/save.
-        /// Terrain render edits on a never-saved map are refused (A-v8 and A-v10 crashed natively
+        /// Terrain render edits on a never-saved map are refused (two test sessions crashed natively
         /// right after them on fresh maps; loaded saves never did).
         /// </summary>
         internal static bool MapEverSaved { get; set; }

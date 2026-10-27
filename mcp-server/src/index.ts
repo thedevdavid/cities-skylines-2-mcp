@@ -2030,7 +2030,7 @@ server.registerTool(
   },
 );
 
-// ---- Objects, natural resources, map settings (round 7) ----
+// ---- Objects, natural resources, map settings ----
 
 async function readJsonBody(file: string | undefined, inline: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
   if (file) return JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;

@@ -303,7 +303,7 @@ namespace CS2MCP
                 auxiliaryOwners = auxiliaryOwners ?? AuxiliaryNetOwners();
                 if (options.allowAuxiliaryNets != true && auxiliaryOwners.TryGetValue(dto.prefab, out string auxOwner))
                 {
-                    // 0.9.33: A-v8 crashed natively (no managed stack) right after a standalone
+                    // 0.9.33: a test import crashed natively (no managed stack) right after a standalone
                     // "BXP Double Deck Suspension Bridge - Lower Highway" edge was built: that net is
                     // the upper deck's AuxiliaryNets entry, which the upper deck spawns itself.
                     problems.Add($"edge '{dto.id}': '{dto.prefab}' is an auxiliary net of '{auxOwner}' (spawned by that prefab, not placeable on its own); import '{auxOwner}' only, or set options.allowAuxiliaryNets");
@@ -314,14 +314,14 @@ namespace CS2MCP
                     && ownerPrefab.TryGet(out AuxiliaryNets ownAux) && ownAux.m_AuxiliaryNets != null && ownAux.m_AuxiliaryNets.Length > 0)
                 {
                     // 0.9.36: the owner side. A lone "BXP Double Deck Suspension Bridge - Highway" edge
-                    // (976 m, nodesFirst) killed the game natively every time (A-v8 16:11 and 17:44);
+                    // (976 m, nodesFirst) killed the game natively every time (twice in testing);
                     // CourseSplitSystem builds the aux courses in Burst jobs without bounds checks.
                     var paired = new List<string>();
                     foreach (AuxiliaryNetInfo info in ownAux.m_AuxiliaryNets)
                     {
                         paired.Add(info?.m_Prefab != null ? info.m_Prefab.name : "?");
                     }
-                    problems.Add($"edge '{dto.id}': '{dto.prefab}' spawns auxiliary nets ({string.Join(", ", paired)}); importing it crashed the game natively (A-v8), so it is refused; place it by hand with the net tool, or set options.allowAuxiliaryNets at your own risk");
+                    problems.Add($"edge '{dto.id}': '{dto.prefab}' spawns auxiliary nets ({string.Join(", ", paired)}); importing it crashed the game natively in testing, so it is refused; place it by hand with the net tool, or set options.allowAuxiliaryNets at your own risk");
                     continue;
                 }
                 float2[] control = null;

@@ -2,6 +2,16 @@
 
 **English** | [简体中文](README.CHS.md)
 
+## Editor import (this fork)
+
+The `editor-import` branch extends the bridge so that a whole map can be built in the Cities: Skylines II **map editor** from offline data: road and rail networks (with bridges, dams and auxiliary nets checked before import), objects and trees, surfaces, water sources, natural resources, terrain heightmaps, terrain paint and textures, climate and render settings, map tiles, saving and the map preview, and Traffic (TM:PE) lane connections. Every import has a dry run, a status endpoint and an undo.
+
+- Map, terrain, look and save endpoints: [MAP_SETTINGS.md](MAP_SETTINGS.md).
+- Import request formats (network, objects, water, surfaces, resources, TM:PE): [IMPORT_SCHEMA.md](IMPORT_SCHEMA.md), with [SURFACES.md](SURFACES.md) and [PREFAB_NAMES.md](PREFAB_NAMES.md) for reference.
+- The branch targets the map editor; most imports also work in a running city.
+
+The upstream README follows.
+
 Give Claude (or any MCP client) **full control** over a running Cities: Skylines II game: read city data, drive the camera and take screenshots, build roads and buildings, paint zones, manage finances and policies, and control simulation time.
 
 ## Architecture

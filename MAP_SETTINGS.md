@@ -230,7 +230,7 @@ It is a preview only and is not saved with the map. The season look follows the 
 - **`POST /map/settings` with `climateEdit`:** the response adds the same `climateSample`, so a copy whose curves were not rebuilt shows at once.
 
 **0.9.40–0.9.41, climate overrides:**
-- **Where they come from:** Time and Weather Anarchy (PDX 88893) applies its selected profile's overrides in the main menu: temperature, precipitation, cloudiness, fog, aurora and date. In the editor it stops updating them but never clears them. Its "desert" profile (31 °C, no precipitation, lat 40.77 / lon 116.05) pinned A-v9's readings.
+- **Where they come from:** Time and Weather Anarchy (PDX 88893) applies its selected profile's overrides in the main menu: temperature, precipitation, cloudiness, fog, aurora and date. In the editor it stops updating them but never clears them. Its "desert" profile (31 °C, no precipitation, lat 40.77 / lon 116.05) pinned the readings of a test editor session.
 - **Editor load:** since 0.9.41 the bridge clears the five weather overrides when an editor map loads, and logs which were on. It leaves the date alone.
 - **`POST {"clearOverrides": true}`:** clears the five weather overrides at any time. It also clears the date override unless the same call sets a date. The response lists the overrides that were on.
 - **GET:** `overrides` shows the state and value of every override, and `timeWeatherAnarchy` shows the mod's selected profile.
@@ -242,13 +242,13 @@ It is a preview only and is not saved with the map. The season look follows the 
 ## Saving the editor map (`POST /map/save?name=…[&overwrite=true]`, 0.9.43)
 
 - **What it does:** runs the editor's own save path (`MapPanelSystem.SaveMap` on the game's `SaveLoadGame` task queue, as the Save Map panel does) and answers `202` at once.
-- **Status:** `GET /map/save/status` reports `state` (queued, saving, written, done, failed), `error`, the metadata guid, the package path under `Maps` with its size in bytes, and `seconds`. `done` means the save callback ran and a non-empty package exists. A save that throws, such as A-v8's MapData sharing violation, comes back as `failed` with the exception.
+- **Status:** `GET /map/save/status` reports `state` (queued, saving, written, done, failed), `error`, the metadata guid, the package path under `Maps` with its size in bytes, and `seconds`. `done` means the save callback ran and a non-empty package exists. A save that throws, such as a MapData sharing violation, comes back as `failed` with the exception.
 - **Names:** a name that already exists answers 409 unless `overwrite=true`. In that case the bridge follows the panel's overwrite branch.
 - **`mapEverSaved`:** true when the map came from a save, was saved through `/map/save`, or was saved in the editor UI since it loaded. The UI case is detected through `MapPanelSystem`'s source guid changing.
 
 **Terrain render edits are refused on never-saved maps (0.9.43):**
 - **What is refused:** `terrainEdit` or `terrainRenderSettings` in `/map/settings`, and `POST /map/terrain-textures`, on a map whose `mapEverSaved` is false. They answer 409 unless `?force=true`.
-- **Why:** the A-v8 and A-v10 native crashes both followed these posts on fresh maps; loaded saves never crashed.
+- **Why:** two native crashes in testing both followed these posts on fresh maps; loaded saves never crashed.
 - **Sequence for the runner:** build, then `POST /map/save?name=…` and wait for `done`, then the look posts, then save again.
 
 ## Loading an editor map (`POST /map/load?name=…`, 0.9.46)
@@ -279,7 +279,7 @@ The Map inspector's buttons do not fire from synthetic clicks, so the bridge cal
 
 ## Saving the look prefabs for other maps (`POST /map/look/save-prefabs`, 0.9.62)
 
-- **Request:** `{kinds?: ["climate","water","terrain"], name: "Dakota Falls"}`.
+- **Request:** `{kinds?: ["climate","water","terrain"], name: "My Map"}`.
 - **What it writes:** renamed clones of the current look prefabs, `<name> Climate` / `<name> Water` / `<name> Terrain`, saved as standalone user prefabs under `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\ImportedData\<name>\<clone>.Prefab`. That is the path the editor's Save asset action (`InspectorPanelSystem.SaveAsset`) uses.
 - **Pickable at once:** the clones are added to the `PrefabSystem`.
 - **Result:** the response lists each clone's guid and path. A name already taken answers a problem for that kind.

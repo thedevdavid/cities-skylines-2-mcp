@@ -795,7 +795,7 @@ namespace CS2MCP
                 // 0.9.40: a FreeHeight course end is placed by CourseSplitSystem.InitializeCoursePos
                 // at max(terrain, water surface + 2 x elevation limit) + elevation (terrain only when
                 // the elevation is below -1). An elevation measured from the terrain alone put every
-                // absolute node over water that much too high: A-v8/A-v9 interchange 8 stood 34-38 m
+                // absolute node over water that much too high: a test import's interchange stood 34-38 m
                 // above its CS1 y. Measure from the same base, so the end lands on AbsoluteY.
                 float y = node.AbsoluteY.Value;
                 float baseHeight = ground;
@@ -1160,7 +1160,7 @@ namespace CS2MCP
                 // straight line at the start's y with elevation 0 at both ends. A course that
                 // follows the terrain instead makes CourseSplitSystem lay the straight fixed
                 // spans along the curve but sample the others from the ends, and the spans
-                // stop sharing nodes (0.9.24 built the A-v5 dam in five unconnected pieces).
+                // stop sharing nodes (0.9.24 built a dam in five unconnected pieces).
                 if (!endAttached)
                 {
                     end.y = start.y;

@@ -324,7 +324,7 @@ namespace CS2MCP
                     AssetDataPath path = AssetImportPipeline.GetPath(null, UncheckedPath.GetLastPathSegmentOrRoot(item.File, out _),
                         $"{texture.name}_{HashUtils.GetHash(texture, item.File)}_{item.ContentHash}", DataType.RawTexture, user);
                     // 0.9.34: the same file gives the same path; never AddAsset over a texture asset
-                    // that is already loaded and in use by the terrain (A-v8 job 2 re-imported all 14).
+                    // that is already loaded and in use by the terrain (a second job re-imported all 14).
                     // 0.9.63: HashUtils.GetHash ignores the pixels (a re-exported PNG of the same name and
                     // size re-bound the old asset), so the name also carries a hash of the file bytes.
                     if (user.Exists(path, out Colossal.IO.AssetDatabase.TextureAsset existing))
@@ -454,7 +454,7 @@ namespace CS2MCP
 
         /// <summary>
         /// 0.9.40: Time and Weather Anarchy (PDX 88893) re-applies its selected profile's custom
-        /// temperature / precipitation / date every frame; A-v9's season test read its "desert"
+        /// temperature / precipitation / date every frame; a season test read its "desert"
         /// profile (31 °C, day 193) on every date.
         /// </summary>
         private static object TimeWeatherAnarchyProfile()

@@ -37,7 +37,7 @@ namespace CS2MCP
             }
             if (request.Method != "POST")
             {
-                return BridgeResponse.Error(405, "POST /map/look/save-prefabs {kinds?: [climate, water, terrain], name: \"Dakota Falls\"}");
+                return BridgeResponse.Error(405, "POST /map/look/save-prefabs {kinds?: [climate, water, terrain], name: \"My Map\"}");
             }
             SaveLookPrefabsDto body;
             try
@@ -50,7 +50,7 @@ namespace CS2MCP
             }
             if (string.IsNullOrWhiteSpace(body.name) || body.name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             {
-                return BridgeResponse.Error(400, "name: a file-name-safe base name, e.g. \"Dakota Falls\"");
+                return BridgeResponse.Error(400, "name: a file-name-safe base name, e.g. \"My Map\"");
             }
             string baseName = body.name.Trim();
             var kinds = body.kinds != null && body.kinds.Count > 0 ? body.kinds : new List<string> { "climate", "water", "terrain" };
